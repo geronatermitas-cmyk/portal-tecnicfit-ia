@@ -1,86 +1,39 @@
+// api/generate.ts  (Node Runtime en Vercel)
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// Este archivo DEBE estar en una carpeta /api en la raíz de tu proyecto.
-// Plataformas como Vercel o Netlify lo detectarán automáticamente como una función de backend.
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
 
-import { GoogleGenAI, Type } from '@google/genai';
-
-// La clave de API SÓLO se lee aquí, en el entorno seguro del servidor.
-const API_KEY = process.env.API_KEY;
-if (!API_KEY) {
-  throw new Error("API_KEY environment variable not set in serverless function environment.");
-}
-const ai = new GoogleGenAI({ apiKey: API_KEY, vertexai: true });
-
-// Esta es una función genérica que se adapta a la mayoría de los proveedores de funciones sin servidor.
-// Recibe una petición (Request) y devuelve una respuesta (Response).
-export default async function handler(req: Request): Promise<Response> {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
+    return res.status(405).json({ error: 'Method not allowed' });
   }
-
   try {
-    const { action, payload } = await req.json();
-
-    if (!action || !payload) {
-      return new Response(JSON.stringify({ error: 'Missing action or payload' }), { status: 400 });
-    }
-
-    let result;
+    const { action, payload } = (req.body ?? {}) as {
+      action?: string;
+      payload?: any;
+    };
+    if (!action) return res.status(400).json({ error: 'Missing action' });
 
     switch (action) {
-      case 'fetchAssistiveDevices':
-      case 'fetchAssistiveFunctionalities':
-        result = await generateText(payload);
-        break;
-      case 'generateImageForTerm':
-        result = await generateImage(payload);
-        break;
+      case 'generateText': {
+        const prompt: string = payload?.prompt ?? '';
+        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const result = await model.generateContent(prompt);
+        return res.status(200).json({ text: result.response.text() });
+      }
+
+      // Si más adelante quieres imágenes, implementa aquí con la API que uses
+      case 'generateImageForTerm': {
+        return res
+          .status(501)
+          .json({ error: 'Image generation not implemented in this endpoint' });
+      }
+
       default:
-        return new Response(JSON.stringify({ error: `Unknown action: ${action}` }), { status: 400 });
+        return res.status(400).json({ error: `Unknown action: ${action}` });
     }
-
-    return new Response(JSON.stringify(result), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-  } catch (error) {
-    console.error('Error in API handler:', error);
-    return new Response(JSON.stringify({ error: 'An internal server error occurred.' }), { status: 500 });
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message ?? 'Server error' });
   }
-}
-
-// Lógica para generar texto, extraída para mayor claridad.
-async function generateText(payload: { prompt: string, schema: any }) {
-  const { prompt, schema } = payload;
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: { role: 'user', parts: [{ text: prompt }] },
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema: schema,
-    }
-  });
-  return JSON.parse(response.text);
-}
-
-// Lógica para generar imágenes, extraída para mayor claridad.
-async function generateImage(payload: { term: string }) {
-  const { term } = payload;
-  const prompt = `Un dibujo lineal simple y claro, en blanco y negro, de un/a ${term} sobre un fondo blanco liso. Estilo iconográfico.`;
-  const response = await ai.models.generateImages({
-    model: 'imagen-4.0-generate-001',
-    prompt: prompt,
-    config: {
-      numberOfImages: 1,
-      outputMimeType: 'image/jpeg',
-      aspectRatio: '4:3',
-    },
-  });
-
-  if (response.generatedImages && response.generatedImages.length > 0) {
-    const base64ImageBytes: string = response.generatedImages[0].image.imageBytes;
-    return { imageUrl: `data:image/jpeg;base64,${base64ImageBytes}` };
-  }
-  return { imageUrl: '' };
 }

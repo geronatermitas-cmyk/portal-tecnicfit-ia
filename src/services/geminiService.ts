@@ -1,98 +1,137 @@
+// src/services/geminiService.ts
+import { DisabilityCategory, Device, Functionality } from './types';
 
-import { DisabilityCategory, Device, Functionality } from '../types';
-import { Type } from '@google/genai'; // Solo importamos Type para mantener la definición del schema
-
-// --- FUNCIÓN GENÉRICA PARA LLAMAR A NUESTRO BACKEND ---
-async function callApi(action: string, payload: any) {
+/** ---------- Cliente genérico para la API ---------- */
+async function callApi<T = any>(action: string, payload: any): Promise<T> {
   const response = await fetch('/api/generate', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, payload }),
   });
 
   if (!response.ok) {
-    const errorBody = await response.json().catch(() => ({ error: 'Failed to parse error response' }));
-    throw new Error(errorBody.error || `API request failed with status ${response.status}`);
+    const body = await response.text().catch(() => '');
+    throw new Error(`API ${response.status}: ${body || response.statusText}`);
   }
-
-  return response.json();
+  return (await response.json()) as T;
 }
 
-// --- DEFINICIONES DE SCHEMAS (se envían al backend) ---
+/** ---------- Utilidades ---------- */
+const categoryMap: Record<DisabilityCategory, string> = {
+  visual: 'ceguera o discapacidad visual grave',
+  auditiva: 'sordera o discapacidad auditiva grave',
+  habla: 'mudez o discapacidad del habla grave',
+};
 
+function buildDevicesPrompt(category: DisabilityCategory) {
+  const catText = categoryMap[category];
+  return (
+    `Genera una lista de 5 dispositivos de asistencia **modernos y populares** ` +
+    `dirigidos a personas con ${catText}. ` +
+    `Escribe resultados neutros, centrados en utilidad. No repitas marcas. ` +
+    `Responde SOLO en JSON.`
+  );
+}
+
+function buildFunctionalitiesPrompt(category: DisabilityCategory) {
+  const catText = categoryMap[category];
+  return (
+    `Genera una lista de 4 funcionalidades de software, apps o herramientas ` +
+    `que ayuden a personas con ${catText}. ` +
+    `Describe de forma breve y útil. Responde SOLO en JSON.`
+  );
+}
+
+/** ---------- Schemas (guía para el modelo) ---------- */
 const deviceSchema = {
-    type: Type.OBJECT,
-    properties: {
-        nombre: { type: Type.STRING, description: "El nombre del dispositivo." },
-        descripcion: { type: Type.STRING, description: "Una breve descripción de para qué sirve el dispositivo." },
-        caracteristicas: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING },
-            description: "Una lista de 3 a 5 características o beneficios clave."
-        }
+  type: 'object',
+  properties: {
+    dispositivos: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          nombre: { type: 'string', description: 'Nombre del dispositivo' },
+          descripcion: { type: 'string', description: 'Descripción breve' },
+          caracteristicas: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '3-5 características clave',
+          },
+          plataformas: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Plataformas/entornos donde aplica (iOS, Android, PC, etc.)',
+          },
+        },
+        required: ['nombre', 'descripcion', 'caracteristicas'],
+      },
     },
-    required: ["nombre", "descripcion", "caracteristicas"]
+  },
+  required: ['dispositivos'],
 };
 
 const functionalitySchema = {
-    type: Type.OBJECT,
-    properties: {
-        nombre: { type: Type.STRING, description: "El nombre de la funcionalidad o aplicación." },
-        descripcion: { type: Type.STRING, description: "Una breve descripción de para qué sirve." },
-        plataformas: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING },
-            description: "Una lista de plataformas donde está disponible (ej. iOS, Android, Windows, macOS)."
-        }
+  type: 'object',
+  properties: {
+    funcionalidades: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          nombre: { type: 'string', description: 'Nombre de la funcionalidad' },
+          descripcion: { type: 'string', description: 'Descripción breve' },
+          ejemplo: {
+            type: 'string',
+            description: 'Ejemplo de app o caso de uso (opcional)',
+          },
+        },
+        required: ['nombre', 'descripcion'],
+      },
     },
-    required: ["nombre", "descripcion", "plataformas"]
+  },
+  required: ['funcionalidades'],
 };
 
+/** ---------- API de alto nivel que usa tu UI ---------- */
 
-// --- FUNCIONES QUE LLAMA EL FRONTEND ---
+export async function generateFromGemini(prompt: string) {
+  const { text } = await callApi<{ text: string }>('generateText', { prompt });
+  return text;
+}
 
-export const fetchAssistiveDevices = async (category: DisabilityCategory): Promise<Omit<Device, 'imageUrl'>[]> => {
-  const categoryMap = {
-      visual: 'ceguera o discapacidad visual grave',
-      auditiva: 'sordera o discapacidad auditiva grave',
-      habla: 'mudez o discapacidad del habla grave'
-  };
-  const prompt = `Genera una lista de 5 dispositivos de asistencia modernos y populares para personas con ${categoryMap[category]}. Para cada dispositivo, proporciona su nombre, una descripción y 3-5 características clave.`;
+export async function fetchAssistiveDevices(
+  category: DisabilityCategory,
+): Promise<Omit<Device, 'imageUrl'>[]> {
+  const prompt = buildDevicesPrompt(category);
+  const { data } = await callApi<{ data: { dispositivos: any[] } }>(
+    'generateStructured',
+    { prompt, schema: deviceSchema },
+  );
 
-  try {
-    const result = await callApi('fetchAssistiveDevices', { prompt, schema: { type: Type.OBJECT, properties: { dispositivos: { type: Type.ARRAY, items: deviceSchema } }, required: ["dispositivos"] } });
-    return (result.dispositivos || []) as Omit<Device, 'imageUrl'>[];
-  } catch (error) {
-    console.error("Error fetching device data:", error);
-    throw new Error("No se pudieron obtener los datos de los dispositivos. Por favor, inténtelo de nuevo más tarde.");
-  }
-};
+  const dispositivos = (data?.dispositivos ?? []) as any[];
+  // Normalización básica hacia tus tipos (sin imageUrl)
+  return dispositivos.map((d) => ({
+    nombre: String(d.nombre ?? ''),
+    descripcion: String(d.descripcion ?? ''),
+    caracteristicas: Array.isArray(d.caracteristicas) ? d.caracteristicas.map(String) : [],
+    plataformas: Array.isArray(d.plataformas) ? d.plataformas.map(String) : [],
+  }));
+}
 
-export const fetchAssistiveFunctionalities = async (category: DisabilityCategory): Promise<Omit<Functionality, 'imageUrl'>[]> => {
-  const categoryMap = {
-      visual: 'ceguera o discapacidad visual grave',
-      auditiva: 'sordera o discapacidad auditiva grave',
-      habla: 'mudez o discapacidad del habla grave'
-  };
-  const prompt = `Genera una lista de 4 funcionalidades de software, aplicaciones móviles o funciones de sistema operativo para personas con ${categoryMap[category]}. Para cada una, proporciona su nombre, una descripción y las plataformas donde está disponible.`;
+export async function fetchAssistiveFunctionalities(
+  category: DisabilityCategory,
+): Promise<Omit<Functionality, 'imageUrl'>[]> {
+  const prompt = buildFunctionalitiesPrompt(category);
+  const { data } = await callApi<{ data: { funcionalidades: any[] } }>(
+    'generateStructured',
+    { prompt, schema: functionalitySchema },
+  );
 
-  try {
-    const result = await callApi('fetchAssistiveFunctionalities', { prompt, schema: { type: Type.OBJECT, properties: { funcionalidades: { type: Type.ARRAY, items: functionalitySchema } }, required: ["funcionalidades"] } });
-    return (result.funcionalidades || []) as Omit<Functionality, 'imageUrl'>[];
-  } catch (error) {
-    console.error("Error fetching functionality data:", error);
-    throw new Error("No se pudieron obtener los datos de las funcionalidades. Por favor, inténtelo de nuevo más tarde.");
-  }
-};
-
-export const generateImageForTerm = async (term: string): Promise<string> => {
-  try {
-    const result = await callApi('generateImageForTerm', { term });
-    return result.imageUrl || '';
-  } catch (error) {
-    console.error(`Error generating image for term "${term}":`, error);
-    return '';
-  }
-};
+  const funcionalidades = (data?.funcionalidades ?? []) as any[];
+  return funcionalidades.map((f) => ({
+    nombre: String(f.nombre ?? ''),
+    descripcion: String(f.descripcion ?? ''),
+    ejemplo: typeof f.ejemplo === 'string' ? f.ejemplo : undefined,
+  }));
+}
