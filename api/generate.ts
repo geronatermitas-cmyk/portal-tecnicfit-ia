@@ -1,85 +1,92 @@
-// api/generate.ts
-// Función Serverless compatible con Vercel (Node.js Runtime)
-// Maneja peticiones POST desde el frontend (fetch desde geminiService.ts)
-
+// /api/generate.ts  (Vercel Node runtime)
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// --- Inicialización segura ---
-const API_KEY = process.env.API_KEY || process.env.GOOGLE_API_KEY;
-if (!API_KEY) {
-  throw new Error("❌ Falta la variable de entorno API_KEY (configúrala en Vercel).");
+const API_KEY = process.env.GOOGLE_API_KEY || '';
+const MODEL_ID = 'gemini-1.5-flash';
+
+const genAI = API_KEY ? new GoogleGenerativeAI(API_KEY) : null;
+
+function bad(res: VercelResponse, code: number, msg: string, extra?: any) {
+  console.error(`[/api/generate] ${code}: ${msg}`, extra || '');
+  return res.status(code).json({ error: msg, details: extra });
 }
-const genAI = new GoogleGenerativeAI(API_KEY);
 
-// --- Handler principal ---
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
   try {
-    const { action, payload } = req.body || {};
-    if (!action || !payload) {
-      return res.status(400).json({ error: 'Missing action or payload' });
+    if (req.method !== 'POST') {
+      return bad(res, 405, 'Method not allowed');
+    }
+    if (!API_KEY || !genAI) {
+      return bad(res, 500, 'GOOGLE_API_KEY is missing on server');
     }
 
-    let result;
+    const { action, payload } = (req.body ?? {}) as {
+      action?: string;
+      payload?: any;
+    };
+    if (!action) return bad(res, 400, 'Missing action');
+
+    // Helper: genera texto libre
+    const generateText = async (prompt: string) => {
+      const model = genAI.getGenerativeModel({ model: MODEL_ID });
+      const out = await model.generateContent(prompt);
+      return out.response?.text() ?? '';
+    };
+
+    // Helper: genera JSON (sin obligar responseMimeType; parseamos manual)
+    const generateJSON = async (prompt: string) => {
+      const model = genAI.getGenerativeModel({ model: MODEL_ID });
+      const out = await model.generateContent(
+        prompt +
+          '\n\nDEVUELVE ÚNICAMENTE JSON VÁLIDO, sin texto extra, siguiendo el esquema pedido.'
+      );
+      const raw = out.response?.text() ?? '';
+      try {
+        return { ok: true as const, data: JSON.parse(raw) };
+      } catch (e) {
+        return { ok: false as const, raw, parseError: String(e) };
+      }
+    };
 
     switch (action) {
-      // Generar texto estructurado (JSON con dispositivos o funcionalidades)
-      case 'fetchAssistiveDevices':
-      case 'fetchAssistiveFunctionalities': {
-        const prompt = payload.prompt;
-        const schema = payload.schema;
-
-        const model = genAI.getGenerativeModel({
-          model: 'gemini-1.5-flash',
-          generationConfig: {
-            responseMimeType: 'application/json',
-            responseSchema: schema,
-          },
-        });
-
-        const response = await model.generateContent(prompt);
-        const text = response.response.text();
-
-        try {
-          result = JSON.parse(text);
-        } catch (e) {
-          console.error('Error al parsear JSON desde Gemini:', text);
-          return res.status(500).json({ error: 'Invalid JSON returned by Gemini' });
-        }
-
-        break;
-      }
-
-      // Generación de imagen (por ahora devuelves placeholder)
-      case 'generateImageForTerm': {
-        const TRANSPARENT_PNG =
-          'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEklEQVR42mP8/5+hHgMDAwMjAAAmQwO1PqkW2QAAAABJRU5ErkJggg==';
-        result = { imageUrl: TRANSPARENT_PNG };
-        break;
-      }
-
-      // Texto libre (si lo necesitas para debugging)
       case 'generateText': {
         const prompt: string = payload?.prompt ?? '';
-        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-        const response = await model.generateContent(prompt);
-        result = { text: response.response.text() };
-        break;
+        const text = await generateText(prompt);
+        return res.status(200).json({ text });
+      }
+
+      // Lista de dispositivos
+      case 'fetchAssistiveDevices': {
+        const prompt: string = payload?.prompt ?? '';
+        // Esperamos { dispositivos: [{ nombre, descripcion, caracteristicas[] }] }
+        const r = await generateJSON(prompt);
+        if (!r.ok) return bad(res, 422, 'JSON parse failed', r);
+        return res.status(200).json(r.data);
+      }
+
+      // Lista de funcionalidades
+      case 'fetchAssistiveFunctionalities': {
+        const prompt: string = payload?.prompt ?? '';
+        // Esperamos { funcionalidades: [{ nombre, descripcion, plataformas[] }] }
+        const r = await generateJSON(prompt);
+        if (!r.ok) return bad(res, 422, 'JSON parse failed', r);
+        return res.status(200).json(r.data);
+      }
+
+      // (Placeholder) Generación de imagen no implementada aquí
+      case 'generateImageForTerm': {
+        return bad(res, 501, 'Image generation not implemented in this endpoint');
       }
 
       default:
-        return res.status(400).json({ error: `Unknown action: ${action}` });
+        return bad(res, 400, `Unknown action: ${action}`);
     }
-
-    return res.status(200).json(result);
-  } catch (error: any) {
-    console.error('API Error:', error);
-    return res
-      .status(500)
-      .json({ error: error?.message || 'An internal server error occurred' });
+  } catch (err: any) {
+    // Mostramos mensaje y lo reenviamos al cliente para depurar
+    return bad(res, 500, err?.message || 'Server error', {
+      stack: err?.stack,
+      cause: err?.cause,
+    });
   }
 }
