@@ -1,39 +1,85 @@
-// api/generate.ts  (Node Runtime en Vercel)
+// api/generate.ts
+// Función Serverless compatible con Vercel (Node.js Runtime)
+// Maneja peticiones POST desde el frontend (fetch desde geminiService.ts)
+
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
+// --- Inicialización segura ---
+const API_KEY = process.env.API_KEY || process.env.GOOGLE_API_KEY;
+if (!API_KEY) {
+  throw new Error("❌ Falta la variable de entorno API_KEY (configúrala en Vercel).");
+}
+const genAI = new GoogleGenerativeAI(API_KEY);
 
+// --- Handler principal ---
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
   try {
-    const { action, payload } = (req.body ?? {}) as {
-      action?: string;
-      payload?: any;
-    };
-    if (!action) return res.status(400).json({ error: 'Missing action' });
+    const { action, payload } = req.body || {};
+    if (!action || !payload) {
+      return res.status(400).json({ error: 'Missing action or payload' });
+    }
+
+    let result;
 
     switch (action) {
+      // Generar texto estructurado (JSON con dispositivos o funcionalidades)
+      case 'fetchAssistiveDevices':
+      case 'fetchAssistiveFunctionalities': {
+        const prompt = payload.prompt;
+        const schema = payload.schema;
+
+        const model = genAI.getGenerativeModel({
+          model: 'gemini-1.5-flash',
+          generationConfig: {
+            responseMimeType: 'application/json',
+            responseSchema: schema,
+          },
+        });
+
+        const response = await model.generateContent(prompt);
+        const text = response.response.text();
+
+        try {
+          result = JSON.parse(text);
+        } catch (e) {
+          console.error('Error al parsear JSON desde Gemini:', text);
+          return res.status(500).json({ error: 'Invalid JSON returned by Gemini' });
+        }
+
+        break;
+      }
+
+      // Generación de imagen (por ahora devuelves placeholder)
+      case 'generateImageForTerm': {
+        const TRANSPARENT_PNG =
+          'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEklEQVR42mP8/5+hHgMDAwMjAAAmQwO1PqkW2QAAAABJRU5ErkJggg==';
+        result = { imageUrl: TRANSPARENT_PNG };
+        break;
+      }
+
+      // Texto libre (si lo necesitas para debugging)
       case 'generateText': {
         const prompt: string = payload?.prompt ?? '';
         const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-        const result = await model.generateContent(prompt);
-        return res.status(200).json({ text: result.response.text() });
-      }
-
-      // Si más adelante quieres imágenes, implementa aquí con la API que uses
-      case 'generateImageForTerm': {
-        return res
-          .status(501)
-          .json({ error: 'Image generation not implemented in this endpoint' });
+        const response = await model.generateContent(prompt);
+        result = { text: response.response.text() };
+        break;
       }
 
       default:
         return res.status(400).json({ error: `Unknown action: ${action}` });
     }
-  } catch (e: any) {
-    return res.status(500).json({ error: e?.message ?? 'Server error' });
+
+    return res.status(200).json(result);
+  } catch (error: any) {
+    console.error('API Error:', error);
+    return res
+      .status(500)
+      .json({ error: error?.message || 'An internal server error occurred' });
   }
 }
