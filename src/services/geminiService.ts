@@ -151,11 +151,12 @@ export async function fetchAssistiveFunctionalities(
     ? data.funcionalidades
     : [];
 
-  return funcionalidades.map((f) => ({
-    nombre: String(f?.nombre ?? ''),
-    descripcion: String(f?.descripcion ?? ''),
-    ejemplo: typeof f?.ejemplo === 'string' ? f.ejemplo : undefined,
-  }));
+export interface Functionality {
+  nombre: string;
+  descripcion: string;
+  plataformas: string[];
+  imageUrl: string;
+}
 }
 
 /* ----------------------------- (Opcional) Img ------------------------------ */
