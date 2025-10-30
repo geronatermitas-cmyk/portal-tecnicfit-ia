@@ -1,92 +1,99 @@
-// /api/generate.ts  (Vercel Node runtime)
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+// api/generate.ts — compatible con CommonJS en Vercel
+// ❗️Sin imports ESM. Usamos require() y module.exports.
 
-const API_KEY = process.env.GOOGLE_API_KEY || '';
-const MODEL_ID = 'gemini-1.5-flash';
+type VercelRequest = any;
+type VercelResponse = any;
 
-const genAI = API_KEY ? new GoogleGenerativeAI(API_KEY) : null;
+// Carga del SDK en CommonJS
+// @ts-ignore
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-function bad(res: VercelResponse, code: number, msg: string, extra?: any) {
-  console.error(`[/api/generate] ${code}: ${msg}`, extra || '');
-  return res.status(code).json({ error: msg, details: extra });
+const API_KEY =
+  process.env.GOOGLE_API_KEY ||
+  process.env.API_KEY ||
+  '';
+
+/** Pequeña ayuda para devolver errores consistentes */
+function sendError(res: VercelResponse, status: number, msg: string, details?: any) {
+  return res.status(status).json({ error: msg, details });
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+module.exports = async function handler(req: VercelRequest, res: VercelResponse) {
+  // Solo POST
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  if (!API_KEY) {
+    return sendError(
+      res,
+      500,
+      'Missing API key',
+      'Define GOOGLE_API_KEY (o API_KEY) en Vercel → Project → Settings → Environment Variables y redeploy.'
+    );
+  }
+
+  // Instancia aquí (tras validar clave) para evitar crear el cliente si no hay KEY
+  const genAI = new GoogleGenerativeAI(API_KEY);
+
   try {
-    if (req.method !== 'POST') {
-      return bad(res, 405, 'Method not allowed');
-    }
-    if (!API_KEY || !genAI) {
-      return bad(res, 500, 'GOOGLE_API_KEY is missing on server');
-    }
+    const body = req.body || {};
+    const action: string | undefined = body.action;
+    const payload: any = body.payload;
 
-    const { action, payload } = (req.body ?? {}) as {
-      action?: string;
-      payload?: any;
-    };
-    if (!action) return bad(res, 400, 'Missing action');
-
-    // Helper: genera texto libre
-    const generateText = async (prompt: string) => {
-      const model = genAI.getGenerativeModel({ model: MODEL_ID });
-      const out = await model.generateContent(prompt);
-      return out.response?.text() ?? '';
-    };
-
-    // Helper: genera JSON (sin obligar responseMimeType; parseamos manual)
-    const generateJSON = async (prompt: string) => {
-      const model = genAI.getGenerativeModel({ model: MODEL_ID });
-      const out = await model.generateContent(
-        prompt +
-          '\n\nDEVUELVE ÚNICAMENTE JSON VÁLIDO, sin texto extra, siguiendo el esquema pedido.'
-      );
-      const raw = out.response?.text() ?? '';
-      try {
-        return { ok: true as const, data: JSON.parse(raw) };
-      } catch (e) {
-        return { ok: false as const, raw, parseError: String(e) };
-      }
-    };
+    if (!action) return sendError(res, 400, 'Missing action');
 
     switch (action) {
+      /** Texto libre (si lo usas) */
       case 'generateText': {
         const prompt: string = payload?.prompt ?? '';
-        const text = await generateText(prompt);
-        return res.status(200).json({ text });
+        if (!prompt) return sendError(res, 400, 'Missing prompt');
+
+        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const result = await model.generateContent(prompt);
+        return res.status(200).json({ text: result.response.text() });
       }
 
-      // Lista de dispositivos
-      case 'fetchAssistiveDevices': {
+      /** Estructurado (lo que llaman tus pantallas de Catálogo/Funcionalidades) */
+      case 'generateStructured': {
         const prompt: string = payload?.prompt ?? '';
-        // Esperamos { dispositivos: [{ nombre, descripcion, caracteristicas[] }] }
-        const r = await generateJSON(prompt);
-        if (!r.ok) return bad(res, 422, 'JSON parse failed', r);
-        return res.status(200).json(r.data);
+        const schema: any = payload?.schema;
+        if (!prompt) return sendError(res, 400, 'Missing prompt');
+        if (!schema) return sendError(res, 400, 'Missing schema');
+
+        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+        const result = await model.generateContent({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            responseSchema: schema,
+          } as any,
+        });
+
+        const text = result.response.text() || '';
+        try {
+          const data = JSON.parse(text);
+          return res.status(200).json({ data });
+        } catch {
+          // Si el modelo no respetó el JSON estricto, devolvemos 422 con el texto bruto
+          return res.status(422).json({
+            error: 'Structured JSON parse failed',
+            raw: text,
+          });
+        }
       }
 
-      // Lista de funcionalidades
-      case 'fetchAssistiveFunctionalities': {
-        const prompt: string = payload?.prompt ?? '';
-        // Esperamos { funcionalidades: [{ nombre, descripcion, plataformas[] }] }
-        const r = await generateJSON(prompt);
-        if (!r.ok) return bad(res, 422, 'JSON parse failed', r);
-        return res.status(200).json(r.data);
-      }
-
-      // (Placeholder) Generación de imagen no implementada aquí
+      /** Aún no implementado (si decides añadir imágenes) */
       case 'generateImageForTerm': {
-        return bad(res, 501, 'Image generation not implemented in this endpoint');
+        return res.status(501).json({ error: 'Image generation not implemented' });
       }
 
       default:
-        return bad(res, 400, `Unknown action: ${action}`);
+        return sendError(res, 400, `Unknown action: ${action}`);
     }
-  } catch (err: any) {
-    // Mostramos mensaje y lo reenviamos al cliente para depurar
-    return bad(res, 500, err?.message || 'Server error', {
-      stack: err?.stack,
-      cause: err?.cause,
-    });
+  } catch (e: any) {
+    console.error('API /api/generate error:', e?.message || e);
+    return sendError(res, 500, 'Server error', e?.message || String(e));
   }
-}
+};
