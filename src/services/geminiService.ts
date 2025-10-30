@@ -163,3 +163,12 @@ export async function fetchAssistiveFunctionalities(
  *  y llámalo aquí con fetch, igual que hacemos con generateText/generateStructured.
  *  Mantén SIEMPRE la generación de imágenes/texto en el backend.
 */
+// --- Imagen: stub temporal para que compile ---
+// PNG 1x1 transparente (data URL)
+const TRANSPARENT_PNG =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEklEQVR42mP8/5+hHgMDAwMjAAAmQwO1PqkW2QAAAABJRU5ErkJggg==';
+
+/** Stub: mientras no exista endpoint real de imágenes en /api */
+export async function generateImageForTerm(_term: string): Promise<string> {
+  return TRANSPARENT_PNG; // o '' si prefieres sin imagen
+}
