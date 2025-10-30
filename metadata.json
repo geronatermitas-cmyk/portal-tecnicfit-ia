@@ -1,0 +1,8 @@
+
+{
+  "name": "Portal de Accesibilidad",
+  "description": "Un portal para informar sobre dispositivos de asistencia y proporcionar herramientas de comunicación para personas con discapacidades visuales, auditivas y del habla.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
