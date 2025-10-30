@@ -162,4 +162,4 @@ export async function fetchAssistiveFunctionalities(
 /** Si más adelante quieres imágenes, crea un endpoint específico en /api
  *  y llámalo aquí con fetch, igual que hacemos con generateText/generateStructured.
  *  Mantén SIEMPRE la generación de imágenes/texto en el backend.
- *//
+*/
