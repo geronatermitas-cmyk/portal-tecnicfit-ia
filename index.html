@@ -4,9 +4,47 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Portal TecnicFit</title>
+  <style>
+    :root{--bg:#0f172a;--card:#111827;--text:#e5e7eb;--muted:#94a3b8;}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial}
+    header{padding:32px 24px;text-align:center;color:var(--text)}
+    h1{margin:0 0 8px;font-size:clamp(24px,4vw,34px)}
+    p{margin:0;color:var(--muted)}
+    .grid{display:grid;gap:16px;padding:24px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));max-width:1200px;margin:0 auto}
+    .card{background:linear-gradient(180deg,#111827 0%,#0b1220 100%);border:1px solid #1f2937;border-radius:16px;padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.25);transition:transform .15s ease, border-color .15s ease}
+    .card:hover{transform:translateY(-3px);border-color:#334155}
+    .card h3{color:var(--text);margin:0 0 6px;font-size:20px}
+    .card p{color:var(--muted);margin:0 0 14px;font-size:14px;min-height:40px}
+    .btn{display:inline-block;text-decoration:none;background:#2563eb;color:white;padding:10px 14px;border-radius:10px;font-weight:600}
+    footer{color:var(--muted);text-align:center;padding:20px 16px}
+  </style>
 </head>
-<body style="font-family:system-ui;margin:40px">
-  <h1>✅ Portal TecnicFit operativo</h1>
-  <p>Este es un índice de prueba en Vercel.</p>
+<body>
+  <header>
+    <h1>Portal TecnicFit</h1>
+    <p>Accesos rápidos a tus herramientas y apps</p>
+  </header>
+
+  <main class="grid">
+    <article class="card">
+      <h3>Genera tu Ruta</h3>
+      <p>Planificador de rutas (Streamlit) con Google Maps.</p>
+      <a class="btn" href="https://genera-tu-ruta.streamlit.app" target="_blank" rel="noopener">Abrir</a>
+    </article>
+
+    <article class="card">
+      <h3>Portal de Accesibilidad</h3>
+      <p>Recursos y pruebas de accesibilidad web.</p>
+      <a class="btn" href="accesibilidad.html">Entrar</a>
+    </article>
+
+    <article class="card">
+      <h3>Panel TecnicFit</h3>
+      <p>Demo del panel de control / enlaces internos.</p>
+      <a class="btn" href="panel.html">Abrir</a>
+    </article>
+  </main>
+
+  <footer>© TecnicFit · <a href="mailto:molinero040778@icloud.com">Contacto</a></footer>
 </body>
 </html>
