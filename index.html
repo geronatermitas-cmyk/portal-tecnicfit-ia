@@ -1,22 +1,56 @@
 <!DOCTYPE html>
 <html lang="es">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Portal de Accesibilidad</title>
-    <!-- Tailwind CDN (opcional; si más adelante usas postcss/tailwind, podrás quitarlo) -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
-    <style>
-      body { font-family: 'Atkinson Hyperlegible', sans-serif; }
-      *:focus-visible { outline: 4px solid #3b82f6 !important; outline-offset: 2px; border-radius: 4px; }
-    </style>
-  </head>
-  <body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-    <div id="root"></div>
-    <!-- CLAVE: en Vite la entrada está en /src/index.tsx -->
-    <script type="module" src="/src/index.tsx"></script>
-  </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Portal de Accesibilidad</title>
+
+  <!-- Tailwind CDN (válido mientras estés en prototipo; para producción se puede migrar a PostCSS) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Fuente accesible -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap"
+    rel="stylesheet"
+  >
+
+  <!-- Script para establecer tema claro por defecto -->
+  <script>
+    (function () {
+      try {
+        const saved = localStorage.getItem('theme'); // 'light' | 'dark' | null
+        const prefersDark = window.matchMedia &&
+          window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const useDark = saved ? (saved === 'dark') : prefersDark;
+        const html = document.documentElement;
+        if (useDark) {
+          html.classList.add('dark');
+        } else {
+          html.classList.remove('dark');
+        }
+      } catch (_) {}
+    })();
+  </script>
+
+  <style>
+    body {
+      font-family: 'Atkinson Hyperlegible', sans-serif;
+    }
+    /* Estilos de foco visibles y accesibles */
+    *:focus-visible {
+      outline: 4px solid #3b82f6 !important;
+      outline-offset: 2px;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+  <div id="root"></div>
+
+  <!-- Entrada principal (Vite busca este archivo) -->
+  <script type="module" src="/src/index.tsx"></script>
+</body>
 </html>
