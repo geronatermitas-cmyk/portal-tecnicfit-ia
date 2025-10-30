@@ -164,11 +164,10 @@ export async function fetchAssistiveFunctionalities(
  *  Mantén SIEMPRE la generación de imágenes/texto en el backend.
 */
 // --- Imagen: stub temporal para que compile ---
-// PNG 1x1 transparente (data URL)
+// PNG 1x1 transparente
 const TRANSPARENT_PNG =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEklEQVR42mP8/5+hHgMDAwMjAAAmQwO1PqkW2QAAAABJRU5ErkJggg==';
 
-/** Stub: mientras no exista endpoint real de imágenes en /api */
 export async function generateImageForTerm(_term: string): Promise<string> {
-  return TRANSPARENT_PNG; // o '' si prefieres sin imagen
+  return TRANSPARENT_PNG; // devuelve un data URL válido
 }
