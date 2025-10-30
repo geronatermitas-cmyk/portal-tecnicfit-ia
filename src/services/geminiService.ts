@@ -1,10 +1,11 @@
 // src/services/geminiService.ts
 // Cliente FRONTEND para hablar con /api/generate (backend).
-// NO usa el SDK de Google en el navegador; solo fetch al backend.
+// No usamos SDKs en el navegador: solo fetch al backend.
 
 import type { DisabilityCategory, Device, Functionality } from '../types';
 
 /* ---------------------------------- utils ---------------------------------- */
+
 type ApiOk<T> = T;
 
 async function callApi<T = any>(action: string, payload: any): Promise<ApiOk<T>> {
@@ -15,7 +16,6 @@ async function callApi<T = any>(action: string, payload: any): Promise<ApiOk<T>>
   });
 
   if (!res.ok) {
-    // Intento de leer json/texto para dar un error útil
     let msg = res.statusText;
     try {
       const txt = await res.text();
@@ -23,10 +23,12 @@ async function callApi<T = any>(action: string, payload: any): Promise<ApiOk<T>>
     } catch {}
     throw new Error(`API ${res.status}: ${msg}`);
   }
+
   return (await res.json()) as T;
 }
 
 /* ---------------------------- prompts y mapeos ----------------------------- */
+
 const categoryMap: Record<DisabilityCategory, string> = {
   visual: 'ceguera o discapacidad visual grave',
   auditiva: 'sordera o discapacidad auditiva grave',
@@ -37,7 +39,7 @@ function buildDevicesPrompt(category: DisabilityCategory): string {
   const cat = categoryMap[category];
   return (
     `Genera una lista de 5 dispositivos de asistencia modernos y populares ` +
-    `para personas con ${cat}. Para cada uno, devuelve nombre, una descripción ` +
+    `para personas con ${cat}. Para cada uno, devuelve: nombre, una descripción ` +
     `clara y entre 3 y 5 características clave. Responde SOLO en JSON válido.`
   );
 }
@@ -46,15 +48,14 @@ function buildFunctionalitiesPrompt(category: DisabilityCategory): string {
   const cat = categoryMap[category];
   return (
     `Genera una lista de 4 funcionalidades de software o aplicaciones que ` +
-    `ayuden a personas con ${cat}. Para cada una, devuelve nombre, descripción ` +
+    `ayuden a personas con ${cat}. Para cada una, devuelve: nombre, descripción ` +
     `y una lista de plataformas (iOS, Android, Windows, macOS, etc.). ` +
     `Responde SOLO en JSON válido.`
   );
 }
 
-/* ------------------------------- "Schemas" --------------------------------- */
-/* Guías JSON Schema que enviamos al backend para que fuerce respuesta JSON.   */
-/* OJO: aquí son objetos planos, sin depender de ningún paquete externo.       */
+/* ------------------------------- Schemas ----------------------------------- */
+/* Objetos JSON Schema que enviamos al backend para forzar salida JSON.       */
 
 const deviceItemSchema = {
   type: 'object',
@@ -66,7 +67,7 @@ const deviceItemSchema = {
       items: { type: 'string' },
       description: '3–5 características clave',
     },
-    // Opcional: por si el modelo lo incluye; no es requerido en tu tipo Device (sin imageUrl)
+    // (opcional) por si el modelo lo incluye; no lo usamos en el tipo Device sin imageUrl
     plataformas: {
       type: 'array',
       items: { type: 'string' },
@@ -114,23 +115,22 @@ export async function fetchAssistiveDevices(
 ): Promise<Omit<Device, 'imageUrl'>[]> {
   const prompt = buildDevicesPrompt(category);
 
-  // IMPORTANTE: acción exactamente como la espera tu backend
-  const result = await callApi<{ dispositivos: any[] }>('fetchAssistiveDevices', {
+  // El backend devuelve { data: { dispositivos: [...] } }
+  const result = await callApi<{ data: { dispositivos: any[] } }>('generateStructured', {
     prompt,
     schema: devicesSchemaWrapper,
   });
 
-  const dispositivos = Array.isArray(result?.dispositivos) ? result.dispositivos : [];
+  const dispositivos = Array.isArray(result?.data?.dispositivos)
+    ? result.data.dispositivos
+    : [];
 
-  // Normalización a tus tipos (sin imageUrl)
   return dispositivos.map((d: any) => ({
     nombre: String(d?.nombre ?? ''),
     descripcion: String(d?.descripcion ?? ''),
     caracteristicas: Array.isArray(d?.caracteristicas)
       ? d.caracteristicas.map((c: any) => String(c))
       : [],
-    // Este campo no existe en tu interfaz Device (sin imageUrl) pero si viene lo ignoramos.
-    // plataformas: ... (si quisieras guardarlo en otro sitio)
   }));
 }
 
@@ -140,16 +140,16 @@ export async function fetchAssistiveFunctionalities(
 ): Promise<Omit<Functionality, 'imageUrl'>[]> {
   const prompt = buildFunctionalitiesPrompt(category);
 
-  const result = await callApi<{ funcionalidades: any[] }>('fetchAssistiveFunctionalities', {
+  // El backend devuelve { data: { funcionalidades: [...] } }
+  const result = await callApi<{ data: { funcionalidades: any[] } }>('generateStructured', {
     prompt,
     schema: functionalitiesSchemaWrapper,
   });
 
-  const funcionalidades = Array.isArray(result?.funcionalidades)
-    ? result.funcionalidades
+  const funcionalidades = Array.isArray(result?.data?.funcionalidades)
+    ? result.data.funcionalidades
     : [];
 
-  // Normalización a tu tipo Functionality (sin imageUrl)
   return funcionalidades.map((f: any) => ({
     nombre: String(f?.nombre ?? ''),
     descripcion: String(f?.descripcion ?? ''),
@@ -160,24 +160,17 @@ export async function fetchAssistiveFunctionalities(
 }
 
 /* ----------------------------- (Opcional) Img ------------------------------ */
-/** Si más adelante quieres imágenes reales desde el backend, crea un endpoint
- *  específico (acción 'generateImageForTerm') y llama igual que arriba.
- *  Mantén SIEMPRE la generación en el backend.
- */
+/** Cuando tengas el endpoint real en backend, cambia este stub por la llamada. */
 
-// PNG 1x1 transparente para no romper el UI mientras tanto
 const TRANSPARENT_PNG =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEklEQVR42mP8/5+hHgMDAwMjAAAmQwO1PqkW2QAAAABJRU5ErkJggg==';
 
-export async function generateImageForTerm(term: string): Promise<string> {
-  // Si ya tienes listo el backend de imágenes, descomenta esto y elimina el stub:
+export async function generateImageForTerm(_term: string): Promise<string> {
   // try {
-  //   const res = await callApi<{ imageUrl: string }>('generateImageForTerm', { term });
+  //   const res = await callApi<{ imageUrl: string }>('generateImageForTerm', { term: _term });
   //   return res?.imageUrl || TRANSPARENT_PNG;
   // } catch {
   //   return TRANSPARENT_PNG;
   // }
-
-  // Stub temporal:
   return TRANSPARENT_PNG;
 }
