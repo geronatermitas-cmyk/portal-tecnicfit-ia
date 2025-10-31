@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import { fetchAssistiveDevices } from "../services/geminiService";
 import { DisabilityCategory, Device } from "../types";
 import { useTextToSpeech } from "../hooks/useTextToSpeech";
+import { useSEO } from "../hooks/useSEO";
 
 // tema/estilo unificado
 import { CATEGORY_THEME, accentClasses } from "../styles/theme";
@@ -49,27 +50,56 @@ export const DeviceFinder: React.FC<DeviceFinderProps> = ({ category, goBack }) 
   const theme = CATEGORY_THEME[category];
   const { bg: AccentCircleBg, fg: AccentIconFg } = accentClasses(theme.accent);
 
+  // ---------- SEO ----------
+  const origin =
+    typeof window !== "undefined" ? window.location.origin : "https://portal-tecnicfit-ia.vercel.app";
+
+  const pretty = {
+    visual:   { t: "Discapacidad Visual",   d: "Catálogo de dispositivos de asistencia para discapacidad visual." },
+    auditiva: { t: "Discapacidad Auditiva", d: "Catálogo de dispositivos de asistencia para discapacidad auditiva." },
+    habla:    { t: "Discapacidad del Habla", d: "Catálogo de dispositivos de asistencia para trastornos del habla." },
+  }[category];
+
+  useSEO({
+    title: `Dispositivos · ${pretty.t} · Portal de Accesibilidad`,
+    description: `${pretty.d} Explore fichas, características y accesos guiados por voz.`,
+    url: `${origin}/?view=devices&category=${category}`,
+    jsonLd: {
+      "@context": "https://schema.org",
+      "@type": "CollectionPage",
+      name: `Dispositivos · ${pretty.t} · Portal de Accesibilidad`,
+      url: `${origin}/?view=devices&category=${category}`,
+      inLanguage: "es",
+      about: pretty.d,
+      publisher: { "@type": "Organization", name: "TecnicFit IA" },
+      // Sugerencia de estructura de lista (sin items hasta que carguen)
+      mainEntity: {
+        "@type": "ItemList",
+        itemListOrder: "ItemListOrderAscending",
+      },
+    },
+  });
+  // ------ fin SEO ------
+
   useEffect(() => {
     (async () => {
       setLoading(true);
       setError(null);
-    try {
-      // permitimos respuestas parciales y luego normalizamos
-      const base = (await fetchAssistiveDevices(category)) as Array<Partial<Device>>;
-
-      const normalized: Device[] = base.map((d) => ({
-        nombre: d.nombre ?? "",
-        descripcion: d.descripcion ?? "",
-        caracteristicas: Array.isArray(d.caracteristicas) ? d.caracteristicas : [],
-        imageUrl: typeof d.imageUrl === "string" ? d.imageUrl : "",
-      }));
-
-      setItems(normalized);
-    } catch (e: any) {
-      setError(e?.message ?? "Ocurrió un error.");
-    } finally {
-      setLoading(false);
-    }
+      try {
+        // permitimos respuestas parciales y luego normalizamos
+        const base = (await fetchAssistiveDevices(category)) as Array<Partial<Device>>;
+        const normalized: Device[] = base.map((d) => ({
+          nombre: d.nombre ?? "",
+          descripcion: d.descripcion ?? "",
+          caracteristicas: Array.isArray(d.caracteristicas) ? d.caracteristicas : [],
+          imageUrl: typeof d.imageUrl === "string" ? d.imageUrl : "",
+        }));
+        setItems(normalized);
+      } catch (e: any) {
+        setError(e?.message ?? "Ocurrió un error.");
+      } finally {
+        setLoading(false);
+      }
     })();
   }, [category]);
 
