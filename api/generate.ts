@@ -1,108 +1,58 @@
-// api/generate.ts
-// Función de backend que llama a la Generative Language API por REST.
-// No usa SDK -> cero problemas de módulos.
-// Requiere la env var: GOOGLE_API_KEY
-
-export const config = { runtime: 'edge' }; // también puedes quitar esta línea y usar Node
+// api/generate.ts (Node runtime - Vercel)
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const API_KEY = process.env.GOOGLE_API_KEY;
-const MODEL = 'models/gemini-2.5-flash'; // modelo disponible en tu cuenta (según tu listado)
+const MODEL = 'models/gemini-2.5-flash';
 
-function bad(status: number, body: unknown) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
+function send(res: VercelResponse, status: number, body: unknown) {
+  res.status(status).setHeader('Content-Type', 'application/json').send(JSON.stringify(body));
 }
 
-async function callGeminiGenerateContent(body: unknown) {
-  if (!API_KEY) {
-    return bad(500, { error: 'Missing GOOGLE_API_KEY' });
-  }
+async function callGemini(body: unknown) {
+  if (!API_KEY) return { ok: false, status: 500, body: { error: 'Missing GOOGLE_API_KEY' } };
   const url = `https://generativelanguage.googleapis.com/v1/${MODEL}:generateContent?key=${API_KEY}`;
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  // Si Google responde error, lo pasamos tal cual para depurar.
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    return bad(500, { error: 'Upstream error', details: text });
-  }
-
-  const data = await res.json();
-  return new Response(JSON.stringify(data), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  });
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const text = await r.text();
+  if (!r.ok) return { ok: false, status: 502, body: { error: 'Upstream error', details: text } };
+  return { ok: true, status: 200, body: JSON.parse(text) };
 }
 
-export default async function handler(req: Request): Promise<Response> {
-  if (req.method !== 'POST') return bad(405, { error: 'Method not allowed' });
-
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
   try {
-    const { action, payload } = (await req.json?.()) ?? {};
-    if (!action) return bad(400, { error: 'Missing action' });
+    const { action, payload } = (req.body ?? {}) as { action?: string; payload?: any };
+    if (!action) return send(res, 400, { error: 'Missing action' });
 
-    switch (action) {
-      case 'generateText': {
-        const prompt: string = payload?.prompt ?? '';
-        if (!prompt) return bad(400, { error: 'Missing prompt' });
-
-        // Llamada REST
-        const upstream = await callGeminiGenerateContent({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        });
-        if (!upstream.ok) return upstream;
-
-        const result = await upstream.json();
-        // Extraemos el texto del primer candidato
-        const text =
-          result?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text)?.join('') ?? '';
-
-        return bad(200, { text });
-      }
-
-      case 'generateStructured': {
-        // Espera: { prompt: string, schema: object }
-        const prompt: string = payload?.prompt ?? '';
-        const schema = payload?.schema;
-        if (!prompt || !schema) return bad(400, { error: 'Missing prompt or schema' });
-
-        const upstream = await callGeminiGenerateContent({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: {
-            responseMimeType: 'application/json',
-            responseSchema: schema, // objeto JSON Schema plano
-          },
-        });
-        if (!upstream.ok) return upstream;
-
-        const result = await upstream.json();
-        const raw =
-          result?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text)?.join('') ?? '{}';
-
-        try {
-          const data = JSON.parse(raw);
-          return bad(200, { data });
-        } catch {
-          // si el modelo devolviera algo no-JSON
-          return bad(422, { error: 'LLM returned non-JSON', raw });
-        }
-      }
-
-      case 'generateImageForTerm': {
-        // No implementado aún
-        return bad(501, { error: 'Image generation not implemented' });
-      }
-
-      default:
-        return bad(400, { error: `Unknown action: ${action}` });
+    if (action === 'generateText') {
+      const prompt: string = payload?.prompt ?? '';
+      if (!prompt) return send(res, 400, { error: 'Missing prompt' });
+      const up = await callGemini({ contents: [{ role: 'user', parts: [{ text: prompt }] }] });
+      if (!up.ok) return send(res, up.status, up.body);
+      const parts = (up.body as any)?.candidates?.[0]?.content?.parts ?? [];
+      const text = parts.map((p: any) => p?.text || '').join('');
+      return send(res, 200, { text });
     }
+
+    if (action === 'generateStructured') {
+      const prompt: string = payload?.prompt ?? '';
+      const schema = payload?.schema;
+      if (!prompt || !schema) return send(res, 400, { error: 'Missing prompt or schema' });
+      const up = await callGemini({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: 'application/json', responseSchema: schema },
+      });
+      if (!up.ok) return send(res, up.status, up.body);
+      const raw = (up.body as any)?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text || '').join('') ?? '{}';
+      try { return send(res, 200, { data: JSON.parse(raw) }); }
+      catch { return send(res, 422, { error: 'LLM returned non-JSON', raw }); }
+    }
+
+    if (action === 'generateImageForTerm') {
+      return send(res, 501, { error: 'Image generation not implemented' });
+    }
+
+    return send(res, 400, { error: `Unknown action: ${action}` });
   } catch (e: any) {
-    return bad(500, { error: 'Server error', details: e?.message ?? String(e) });
+    return send(res, 500, { error: 'Server error', details: e?.message ?? String(e) });
   }
 }
