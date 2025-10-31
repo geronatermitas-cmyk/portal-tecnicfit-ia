@@ -8,6 +8,7 @@
     "jsx": "react-jsx",
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "types":[]
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "paths": { "*": ["./src/*"] }
