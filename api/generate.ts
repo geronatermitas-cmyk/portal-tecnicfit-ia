@@ -13,7 +13,7 @@ type VercelResponse = ServerResponse & {
 };
 
 const API_KEY = process.env.GOOGLE_API_KEY;
-const MODEL = 'models/gemini-2.5-flash';
+const MODEL  = 'models/gemini-2.5-flash';
 const API_URL = `https://generativelanguage.googleapis.com/v1/${MODEL}:generateContent`;
 
 /** Envío JSON con status */
@@ -71,6 +71,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return send(res, 200, { ok: true, message: 'Pong!' });
   }
 
+  // Texto libre
   if (action === 'generateText') {
     const prompt: string = payload?.prompt ?? '';
     const requestBody = {
@@ -85,52 +86,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return send(res, 200, { text });
   }
 
+  // Estructurado (JSON)
   if (action === 'generateStructured') {
-    // Forzamos salida JSON vía prompt y validamos aquí
-    // dentro del switch (action)
-case 'generateStructured': {
-  const prompt: string = payload?.prompt ?? '';
-  const schema = payload?.schema ?? undefined;
+    const prompt: string = payload?.prompt ?? '';
+    // Nota: schema está disponible por si quieres incluirlo en el prompt
+    const schema = payload?.schema;
 
-  // Construimos el body mínimo compatible con v1
-  const body: any = {
-    contents: [{ role: 'user', parts: [{ text: prompt }]}],
-  };
+    // Pedimos JSON explícitamente en el prompt
+    const finalPrompt =
+      `${prompt}\n\n` +
+      `Responde SOLO con JSON válido sin texto adicional, sin explicación y sin fences.`;
 
-  // Llamada al modelo
-  const resp = await fetch(`${API_URL}?key=${API_KEY}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+    const requestBody = {
+      contents: [{ role: 'user', parts: [{ text: finalPrompt }]}],
+      // sin responseMimeType (no soportado en v1 para REST)
+    };
 
-  const rawText = await resp.text();      // ← puede venir con fences
-  if (!resp.ok) {
-    return send(res, resp.status, { error: 'LLM error', raw: rawText });
+    const r = await callGemini(requestBody);
+    if (!r.ok) return send(res, r.status, { error: 'LLM error', raw: r.body });
+
+    // Extraemos texto del candidate
+    let textOut = '';
+    try {
+      const j = JSON.parse(r.body as string);
+      textOut = j?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    } catch {
+      textOut = String(r.body ?? '');
+    }
+
+    // Limpieza de fences/preámbulos tipo ```json / json\n
+    let clean = (textOut ?? '').trim();
+    clean = clean.replace(/^```(?:json)?\s*/i, '');
+    clean = clean.replace(/```$/i, '');
+    clean = clean.replace(/^json\s*\n/i, '');
+    clean = clean.trim();
+
+    // Parseo robusto
+    try {
+      const obj = JSON.parse(clean);
+      return send(res, 200, obj);
+    } catch {
+      return send(res, 422, { error: 'Non-JSON response', raw: clean });
+    }
   }
 
-  // Extrae el texto del candidate
-  let textOut = '';
-  try {
-    const j = JSON.parse(rawText);
-    textOut = j?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-  } catch {
-    textOut = rawText; // fallback
-  }
-
-  // Limpieza de fences y prefijos tipo "json\n"
-  let clean = (textOut ?? '').trim();
-  clean = clean.replace(/^```(?:json)?\s*/i, ''); // quita ```json o ```
-  clean = clean.replace(/```$/i, '');             // quita cierre ```
-  clean = clean.replace(/^json\s*\n/i, '');       // quita "json\n" inicial
-  clean = clean.trim();
-
-  // Intenta parsear a JSON
-  try {
-    const obj = JSON.parse(clean);
-    return send(res, 200, obj);
-  } catch (e: any) {
-    // Devuelve 422 con el bruto para que el front lo muestre
-    return send(res, 422, { error: 'Non-JSON response', raw: clean });
-  }
+  // Acción desconocida
+  return send(res, 400, { error: `Unknown action: ${action}` });
 }
