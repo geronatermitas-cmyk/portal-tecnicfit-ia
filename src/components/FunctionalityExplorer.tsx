@@ -1,8 +1,24 @@
-
 import React, { useState, useEffect } from 'react';
-import { fetchAssistiveFunctionalities, generateImageForTerm } from '../services/geminiService';
+import { fetchAssistiveFunctionalities } from '../services/geminiService';
 import { DisabilityCategory, Functionality } from '../types';
 import { useTextToSpeech } from '../hooks/useTextToSpeech';
+
+// Iconos (lucide-react)
+import {
+  Mic,
+  Ear,
+  Languages,
+  Brain,
+  Waves,
+  BellRing,
+  Volume2,
+  Accessibility,
+  Smartphone,
+  Monitor,
+  Headphones,
+  BadgeInfo,
+  type Icon as LucideIcon,
+} from 'lucide-react';
 
 interface FunctionalityExplorerProps {
   category: DisabilityCategory;
@@ -15,55 +31,73 @@ const categorySubtitles: Record<DisabilityCategory, string> = {
   habla: 'Para Discapacidad del Habla',
 };
 
-const ImagePlaceholder = () => (
-    <div className="w-full h-48 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
-        <svg className="w-10 h-10 text-gray-400 dark:text-gray-500 animate-pulse" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14" />
-        </svg>
-    </div>
-);
+// Heurística simple para elegir icono por nombre
+function pickIconByName(name: string): LucideIcon {
+  const n = name.toLowerCase();
 
-const FunctionalityCard: React.FC<{ item: Functionality; onSpeak: (text: string) => void }> = ({ item, onSpeak }) => (
-  <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden transition-transform transform hover:scale-105 flex flex-col">
-    {item.imageUrl ? (
-        <img
-          className="w-full h-48 object-cover"
-          src={item.imageUrl}
-          alt={`Imagen generada de ${item.nombre}`}
-          onError={(e) => {
-            const target = e.target as HTMLImageElement;
-            target.onerror = null;
-            target.src = `https://picsum.photos/seed/${encodeURIComponent(item.nombre)}/400/300`;
-            target.alt = `Imagen de marcador de posición para ${item.nombre}`;
-          }}
-        />
-    ) : (
-        <ImagePlaceholder />
-    )}
-    <div className="p-6 flex flex-col flex-grow">
-      <h3 className="text-2xl font-bold text-green-600 dark:text-green-400">{item.nombre}</h3>
-      <p className="mt-2 text-gray-600 dark:text-gray-300 flex-grow">{item.descripcion}</p>
-      <div className="mt-4">
-        <h4 className="font-semibold text-lg text-gray-800 dark:text-gray-200">Plataformas:</h4>
-        <div className="flex flex-wrap gap-2 mt-2">
-          {item.plataformas.map((platform, index) => (
-            <span key={index} className="px-3 py-1 text-sm font-medium bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-full">{platform}</span>
-          ))}
-        </div>
+  if (n.includes('voz') || n.includes('habla') || n.includes('dictado')) return Mic;
+  if (n.includes('seña') || n.includes('sign')) return Languages;
+  if (n.includes('sonido') || n.includes('audio') || n.includes('ruido')) return Volume2;
+  if (n.includes('alerta') || n.includes('notific')) return BellRing;
+  if (n.includes('reconocim') || n.includes('ai') || n.includes('inteligencia')) return Brain;
+  if (n.includes('vibrac') || n.includes('haptic')) return Waves;
+  if (n.includes('accesib') || n.includes('lector')) return Accessibility;
+  if (n.includes('móvil') || n.includes('android') || n.includes('ios')) return Smartphone;
+  if (n.includes('pc') || n.includes('windows') || n.includes('mac')) return Monitor;
+  if (n.includes('audio') || n.includes('escucha')) return Headphones;
+
+  return BadgeInfo;
+}
+
+const FunctionalityCard: React.FC<{ item: Functionality; onSpeak: (t: string) => void }> = ({ item, onSpeak }) => {
+  const Icon = pickIconByName(item.nombre);
+
+  return (
+    <div className="flex flex-col items-center justify-between rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm transition hover:shadow-md dark:border-gray-700 dark:bg-gray-800">
+      {/* Icono circular estilo portada */}
+      <div className="mb-4 flex h-24 w-24 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/40">
+        <Icon className="h-10 w-10 text-blue-600 dark:text-blue-400" />
       </div>
+
+      {/* Título */}
+      <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100">
+        {item.nombre}
+      </h3>
+
+      {/* Descripción (3 líneas máx) */}
+      <p className="mt-2 line-clamp-3 text-sm text-gray-600 dark:text-gray-300">
+        {item.descripcion}
+      </p>
+
+      {/* Chips de plataformas */}
+      <div className="mt-3 flex flex-wrap justify-center gap-2">
+        {item.plataformas.map((p, i) => (
+          <span
+            key={`${p}-${i}`}
+            className="rounded-full border border-gray-300 bg-gray-50 px-3 py-1 text-xs text-gray-700 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+          >
+            {p}
+          </span>
+        ))}
+      </div>
+
+      {/* Botón acción */}
       <button
-        onClick={() => onSpeak(`Funcionalidad: ${item.nombre}. Descripción: ${item.descripcion}. Plataformas: ${item.plataformas.join(', ')}`)}
-        className="mt-6 inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 dark:focus:ring-offset-gray-800"
+        onClick={() =>
+          onSpeak(
+            `Funcionalidad: ${item.nombre}. Descripción: ${item.descripcion}. Plataformas: ${item.plataformas.join(
+              ', ',
+            )}.`,
+          )
+        }
+        className="mt-4 inline-flex items-center justify-center rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900"
         aria-label={`Leer descripción de ${item.nombre}`}
       >
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-          <path fillRule="evenodd" d="M7 4a1 1 0 011.707-.707l6 6a1 1 0 010 1.414l-6 6A1 1 0 017 16V4zm4 5a1 1 0 100 2h5a1 1 0 100-2h-5z" clipRule="evenodd" />
-        </svg>
         Leer Descripción
       </button>
     </div>
-  </div>
-);
+  );
+};
 
 export const FunctionalityExplorer: React.FC<FunctionalityExplorerProps> = ({ category, goBack }) => {
   const [functionalities, setFunctionalities] = useState<Functionality[]>([]);
@@ -72,34 +106,24 @@ export const FunctionalityExplorer: React.FC<FunctionalityExplorerProps> = ({ ca
   const { speak } = useTextToSpeech();
 
   useEffect(() => {
-    const loadData = async () => {
-      setIsLoading(true);
-      setError(null);
-      setFunctionalities([]);
+    const load = async () => {
       try {
-        const baseFunctionalities = await fetchAssistiveFunctionalities(category);
-        const functionalitiesWithPlaceholders = baseFunctionalities.map(f => ({ ...f, imageUrl: '' }));
-        setFunctionalities(functionalitiesWithPlaceholders);
-        setIsLoading(false);
-
-        // Carga secuencial de imágenes para evitar rate limiting
-        for (let i = 0; i < baseFunctionalities.length; i++) {
-            const func = baseFunctionalities[i];
-            const imageUrl = await generateImageForTerm(func.nombre);
-            setFunctionalities(prevFuncs => {
-                const newFuncs = [...prevFuncs];
-                if (newFuncs[i]) {
-                    newFuncs[i].imageUrl = imageUrl;
-                }
-                return newFuncs;
-            });
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Ocurrió un error desconocido.');
+        setIsLoading(true);
+        setError(null);
+        const base = await fetchAssistiveFunctionalities(category);
+        // Nos aseguramos de que plataformas exista para la UI
+        const normalized = base.map(f => ({
+          ...f,
+          plataformas: Array.isArray(f.plataformas) ? f.plataformas : [],
+        }));
+        setFunctionalities(normalized);
+      } catch (e: any) {
+        setError(e?.message ?? 'Ocurrió un error desconocido.');
+      } finally {
         setIsLoading(false);
       }
     };
-    loadData();
+    load();
   }, [category]);
 
   return (
@@ -107,33 +131,49 @@ export const FunctionalityExplorer: React.FC<FunctionalityExplorerProps> = ({ ca
       <div className="relative mb-8 text-center">
         <button
           onClick={goBack}
-          className="absolute left-0 top-1/2 -translate-y-1/2 inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-gray-900"
+          className="absolute left-0 top-1/2 -translate-y-1/2 inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:focus:ring-offset-gray-900"
           aria-label="Volver al menú de categoría"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+          <svg xmlns="http://www.w3.org/2000/svg" className="mr-2 h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+            <path
+              fillRule="evenodd"
+              d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
+              clipRule="evenodd"
+            />
           </svg>
           Volver
         </button>
+
         <h2 id="functionality-explorer-title" className="text-3xl md:text-4xl font-bold">
           Funcionalidades y Software
         </h2>
         <p className="mt-2 text-xl text-gray-600 dark:text-gray-400">{categorySubtitles[category]}</p>
       </div>
+
       {isLoading && (
-         <div className="flex justify-center items-center p-8">
-            <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-green-500"></div>
+        <div className="flex items-center justify-center p-8">
+          <div className="h-16 w-16 animate-spin rounded-full border-b-4 border-t-4 border-blue-500" />
         </div>
       )}
+
       {error && (
-        <div className="text-center p-4 bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-200 rounded-lg" role="alert">
-          <p className="font-bold">Error</p>
-          <p>{error}</p>
+        <div
+          className="rounded-lg bg-red-100 p-4 text-center text-red-700 dark:bg-red-900 dark:text-red-200"
+          role="alert"
+        >
+          <p className="font-semibold">Error</p>
+          <p className="mt-1 text-sm">{error}</p>
         </div>
       )}
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-        {!isLoading && functionalities.length === 0 && !error && <p className="col-span-full text-center text-gray-500 dark:text-gray-400">No se encontraron funcionalidades.</p>}
-        {functionalities.map((item) => (
+
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        {!isLoading && functionalities.length === 0 && !error && (
+          <p className="col-span-full text-center text-gray-500 dark:text-gray-400">
+            No se encontraron funcionalidades.
+          </p>
+        )}
+
+        {functionalities.map(item => (
           <FunctionalityCard key={item.nombre} item={item} onSpeak={speak} />
         ))}
       </div>
