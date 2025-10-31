@@ -5,13 +5,19 @@
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
-
-  <!-- Categorías accesibilidad -->
-  <url><loc>https://portal-tecnicfit-ia.vercel.app/?category=visual</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://portal-tecnicfit-ia.vercel.app/?category=auditiva</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://portal-tecnicfit-ia.vercel.app/?category=habla</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
-
-  <!-- Vistas clave (si tienes rutas legibles, cámbialas por /dispositivos, /software, etc.) -->
-  <url><loc>https://portal-tecnicfit-ia.vercel.app/devices</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>
-  <url><loc>https://portal-tecnicfit-ia.vercel.app/functionalities</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>
+  <url>
+    <loc>https://portal-tecnicfit-ia.vercel.app/?category=visual</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://portal-tecnicfit-ia.vercel.app/?category=auditiva</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://portal-tecnicfit-ia.vercel.app/?category=habla</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
 </urlset>
