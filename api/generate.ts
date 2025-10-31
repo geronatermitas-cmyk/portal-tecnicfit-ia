@@ -1,88 +1,108 @@
-// api/generate.ts  (Node/Edge en Vercel, ESM)
-// Asegúrate de tener "type": "module" en package.json
+// api/generate.ts
+// Función de backend que llama a la Generative Language API por REST.
+// No usa SDK -> cero problemas de módulos.
+// Requiere la env var: GOOGLE_API_KEY
 
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
+export const config = { runtime: 'edge' }; // también puedes quitar esta línea y usar Node
 
 const API_KEY = process.env.GOOGLE_API_KEY;
-if (!API_KEY) {
-  throw new Error('Missing GOOGLE_API_KEY in environment variables');
+const MODEL = 'models/gemini-2.5-flash'; // modelo disponible en tu cuenta (según tu listado)
+
+function bad(status: number, body: unknown) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
-// Usa un modelo DISPONIBLE para tu clave (según tu listado v1)
-const MODEL_TEXT = 'gemini-2.5-flash';
+async function callGeminiGenerateContent(body: unknown) {
+  if (!API_KEY) {
+    return bad(500, { error: 'Missing GOOGLE_API_KEY' });
+  }
+  const url = `https://generativelanguage.googleapis.com/v1/${MODEL}:generateContent?key=${API_KEY}`;
 
-const genAI = new GoogleGenerativeAI(API_KEY);
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+  // Si Google responde error, lo pasamos tal cual para depurar.
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    return bad(500, { error: 'Upstream error', details: text });
   }
 
-  try {
-    const { action, payload } = (req.body ?? {}) as {
-      action?: string;
-      payload?: any;
-    };
+  const data = await res.json();
+  return new Response(JSON.stringify(data), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
 
-    if (!action) {
-      return res.status(400).json({ error: 'Missing action' });
-    }
+export default async function handler(req: Request): Promise<Response> {
+  if (req.method !== 'POST') return bad(405, { error: 'Method not allowed' });
+
+  try {
+    const { action, payload } = (await req.json?.()) ?? {};
+    if (!action) return bad(400, { error: 'Missing action' });
 
     switch (action) {
       case 'generateText': {
         const prompt: string = payload?.prompt ?? '';
-        const model = genAI.getGenerativeModel({ model: MODEL_TEXT });
-        const result = await model.generateContent(prompt);
-        const text = result.response?.text?.() ?? '';
-        return res.status(200).json({ text });
+        if (!prompt) return bad(400, { error: 'Missing prompt' });
+
+        // Llamada REST
+        const upstream = await callGeminiGenerateContent({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        });
+        if (!upstream.ok) return upstream;
+
+        const result = await upstream.json();
+        // Extraemos el texto del primer candidato
+        const text =
+          result?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text)?.join('') ?? '';
+
+        return bad(200, { text });
       }
 
       case 'generateStructured': {
         // Espera: { prompt: string, schema: object }
         const prompt: string = payload?.prompt ?? '';
-        const schemaObj: any = payload?.schema ?? null;
+        const schema = payload?.schema;
+        if (!prompt || !schema) return bad(400, { error: 'Missing prompt or schema' });
 
-        if (!prompt || !schemaObj) {
-          return res.status(400).json({ error: 'Missing prompt or schema' });
-        }
-
-        const model = genAI.getGenerativeModel({ model: MODEL_TEXT });
-
-        const result = await model.generateContent({
+        const upstream = await callGeminiGenerateContent({
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          // Forzamos JSON puro con schema v1 del SDK
           generationConfig: {
             responseMimeType: 'application/json',
-            responseSchema: schemaObj as any, // { type: 'object', properties: { ... }, required: [...] }
+            responseSchema: schema, // objeto JSON Schema plano
           },
         });
+        if (!upstream.ok) return upstream;
 
-        const raw = result.response?.text?.() ?? '{}';
-        // El SDK devuelve el JSON como string; lo parseamos para darte un objeto
-        let data: unknown;
+        const result = await upstream.json();
+        const raw =
+          result?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text)?.join('') ?? '{}';
+
         try {
-          data = JSON.parse(raw);
+          const data = JSON.parse(raw);
+          return bad(200, { data });
         } catch {
-          return res.status(422).json({ error: 'LLM returned non-JSON', raw });
+          // si el modelo devolviera algo no-JSON
+          return bad(422, { error: 'LLM returned non-JSON', raw });
         }
-        return res.status(200).json({ data });
       }
 
       case 'generateImageForTerm': {
-        // Aún no implementado (stub)
-        return res
-          .status(501)
-          .json({ error: 'Image generation not implemented in this endpoint' });
+        // No implementado aún
+        return bad(501, { error: 'Image generation not implemented' });
       }
 
       default:
-        return res.status(400).json({ error: `Unknown action: ${action}` });
+        return bad(400, { error: `Unknown action: ${action}` });
     }
   } catch (e: any) {
-    // Devuelve mensaje y detalles del SDK si están
-    const msg = e?.message ?? 'Server error';
-    const details = e?.toString?.() ?? String(e);
-    return res.status(500).json({ error: 'Server error', details: details || msg });
+    return bad(500, { error: 'Server error', details: e?.message ?? String(e) });
   }
 }
