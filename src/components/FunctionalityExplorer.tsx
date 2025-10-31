@@ -1,12 +1,12 @@
+// src/components/FunctionalityExplorer.tsx
 import React, { useState, useEffect } from 'react';
 import { fetchAssistiveFunctionalities } from '../services/geminiService';
 import { DisabilityCategory, Functionality } from '../types';
 import { useTextToSpeech } from '../hooks/useTextToSpeech';
 
-// Iconos (lucide-react)
+// Iconos lucide (elige un set seguro y existente)
 import {
   Mic,
-  Ear,
   Languages,
   Brain,
   Waves,
@@ -16,8 +16,7 @@ import {
   Smartphone,
   Monitor,
   Headphones,
-  BadgeInfo,
-  type Icon as LucideIcon,
+  Info as InfoIcon,
 } from 'lucide-react';
 
 interface FunctionalityExplorerProps {
@@ -31,47 +30,42 @@ const categorySubtitles: Record<DisabilityCategory, string> = {
   habla: 'Para Discapacidad del Habla',
 };
 
-// Heurística simple para elegir icono por nombre
-function pickIconByName(name: string): LucideIcon {
-  const n = name.toLowerCase();
-
+// Devolvemos un componente React de icono
+function pickIconByName(name: string): React.ElementType {
+  const n = (name || '').toLowerCase();
   if (n.includes('voz') || n.includes('habla') || n.includes('dictado')) return Mic;
   if (n.includes('seña') || n.includes('sign')) return Languages;
   if (n.includes('sonido') || n.includes('audio') || n.includes('ruido')) return Volume2;
   if (n.includes('alerta') || n.includes('notific')) return BellRing;
-  if (n.includes('reconocim') || n.includes('ai') || n.includes('inteligencia')) return Brain;
+  if (n.includes('reconocim') || n.includes('inteligencia') || n.includes('ai')) return Brain;
   if (n.includes('vibrac') || n.includes('haptic')) return Waves;
   if (n.includes('accesib') || n.includes('lector')) return Accessibility;
-  if (n.includes('móvil') || n.includes('android') || n.includes('ios')) return Smartphone;
-  if (n.includes('pc') || n.includes('windows') || n.includes('mac')) return Monitor;
-  if (n.includes('audio') || n.includes('escucha')) return Headphones;
-
-  return BadgeInfo;
+  if (n.includes('android') || n.includes('ios') || n.includes('móvil')) return Smartphone;
+  if (n.includes('windows') || n.includes('mac') || n.includes('pc')) return Monitor;
+  if (n.includes('escucha') || n.includes('auricular')) return Headphones;
+  return InfoIcon;
 }
 
 const FunctionalityCard: React.FC<{ item: Functionality; onSpeak: (t: string) => void }> = ({ item, onSpeak }) => {
   const Icon = pickIconByName(item.nombre);
 
+  const plataformas = Array.isArray(item.plataformas) ? item.plataformas : [];
+
   return (
     <div className="flex flex-col items-center justify-between rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm transition hover:shadow-md dark:border-gray-700 dark:bg-gray-800">
-      {/* Icono circular estilo portada */}
       <div className="mb-4 flex h-24 w-24 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/40">
         <Icon className="h-10 w-10 text-blue-600 dark:text-blue-400" />
       </div>
 
-      {/* Título */}
-      <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100">
-        {item.nombre}
-      </h3>
+      <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100">{item.nombre}</h3>
 
-      {/* Descripción (3 líneas máx) */}
-      <p className="mt-2 line-clamp-3 text-sm text-gray-600 dark:text-gray-300">
+      {/* Descripción: sin line-clamp para no requerir plugin */}
+      <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
         {item.descripcion}
       </p>
 
-      {/* Chips de plataformas */}
       <div className="mt-3 flex flex-wrap justify-center gap-2">
-        {item.plataformas.map((p, i) => (
+        {plataformas.map((p, i) => (
           <span
             key={`${p}-${i}`}
             className="rounded-full border border-gray-300 bg-gray-50 px-3 py-1 text-xs text-gray-700 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
@@ -81,13 +75,10 @@ const FunctionalityCard: React.FC<{ item: Functionality; onSpeak: (t: string) =>
         ))}
       </div>
 
-      {/* Botón acción */}
       <button
         onClick={() =>
           onSpeak(
-            `Funcionalidad: ${item.nombre}. Descripción: ${item.descripcion}. Plataformas: ${item.plataformas.join(
-              ', ',
-            )}.`,
+            `Funcionalidad: ${item.nombre}. Descripción: ${item.descripcion}. Plataformas: ${plataformas.join(', ')}.`,
           )
         }
         className="mt-4 inline-flex items-center justify-center rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900"
@@ -111,10 +102,9 @@ export const FunctionalityExplorer: React.FC<FunctionalityExplorerProps> = ({ ca
         setIsLoading(true);
         setError(null);
         const base = await fetchAssistiveFunctionalities(category);
-        // Nos aseguramos de que plataformas exista para la UI
-        const normalized = base.map(f => ({
+        const normalized = base.map((f) => ({
           ...f,
-          plataformas: Array.isArray(f.plataformas) ? f.plataformas : [],
+          plataformas: Array.isArray((f as any).plataformas) ? (f as any).plataformas : [],
         }));
         setFunctionalities(normalized);
       } catch (e: any) {
@@ -173,7 +163,7 @@ export const FunctionalityExplorer: React.FC<FunctionalityExplorerProps> = ({ ca
           </p>
         )}
 
-        {functionalities.map(item => (
+        {functionalities.map((item) => (
           <FunctionalityCard key={item.nombre} item={item} onSpeak={speak} />
         ))}
       </div>

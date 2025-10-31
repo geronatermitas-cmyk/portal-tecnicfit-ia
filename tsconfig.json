@@ -5,16 +5,14 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
-
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
-
     "strict": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
 
-    "types": []
+    "types": ["react", "react-dom"]   // ← aquí
   },
-  "include": ["src", "api", "index.html", "vite.config.ts"]
+  "include": ["src", "api", "index.html", "vite.config.ts", "vite-env.d.ts"]  // ← aquí
 }
