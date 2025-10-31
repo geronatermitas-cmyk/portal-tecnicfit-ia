@@ -87,40 +87,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (action === 'generateStructured') {
     // Forzamos salida JSON vía prompt y validamos aquí
-    const prompt: string = payload?.prompt ?? '';
-    const schema = payload?.schema; // lo incluimos en el prompt para guiar
-    const sys = [
-      'Responde SOLO con JSON válido, sin texto adicional.',
-      'Ajusta exactamente la estructura solicitada.',
-    ].join(' ');
+    // dentro del switch (action)
+case 'generateStructured': {
+  const prompt: string = payload?.prompt ?? '';
+  const schema = payload?.schema ?? undefined;
 
-    const fullPrompt =
-      `${sys}\n\nEsquema orientativo:\n${JSON.stringify(schema)}\n\n` +
-      `Instrucción:\n${prompt}`;
+  // Construimos el body mínimo compatible con v1
+  const body: any = {
+    contents: [{ role: 'user', parts: [{ text: prompt }]}],
+  };
 
-    const requestBody = {
-      contents: [{ role: 'user', parts: [{ text: fullPrompt }]}],
-      generationConfig: { temperature: 0.4 },
-    };
+  // Llamada al modelo
+  const resp = await fetch(`${API_URL}?key=${API_KEY}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
 
-    const r = await callGemini(requestBody);
-    if (!r.ok) return send(res, r.status, { error: 'Server error', details: r.body });
-
-    try {
-      const data = JSON.parse(r.body as string);
-      const text = extractText(data).trim();
-
-      try {
-        const parsed = JSON.parse(text);
-        return send(res, 200, { data: parsed, raw: text });
-      } catch {
-        // Si no fue JSON puro, devolvemos 422 con el texto crudo para que el front lo muestre
-        return send(res, 422, { error: 'Non-JSON response', raw: text });
-      }
-    } catch (e: any) {
-      return send(res, 500, { error: 'Bad response from model', details: e?.message });
-    }
+  const rawText = await resp.text();      // ← puede venir con fences
+  if (!resp.ok) {
+    return send(res, resp.status, { error: 'LLM error', raw: rawText });
   }
 
-  return send(res, 400, { error: `Unknown action: ${action}` });
+  // Extrae el texto del candidate
+  let textOut = '';
+  try {
+    const j = JSON.parse(rawText);
+    textOut = j?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+  } catch {
+    textOut = rawText; // fallback
+  }
+
+  // Limpieza de fences y prefijos tipo "json\n"
+  let clean = (textOut ?? '').trim();
+  clean = clean.replace(/^```(?:json)?\s*/i, ''); // quita ```json o ```
+  clean = clean.replace(/```$/i, '');             // quita cierre ```
+  clean = clean.replace(/^json\s*\n/i, '');       // quita "json\n" inicial
+  clean = clean.trim();
+
+  // Intenta parsear a JSON
+  try {
+    const obj = JSON.parse(clean);
+    return send(res, 200, obj);
+  } catch (e: any) {
+    // Devuelve 422 con el bruto para que el front lo muestre
+    return send(res, 422, { error: 'Non-JSON response', raw: clean });
+  }
 }
