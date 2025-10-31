@@ -1,4 +1,5 @@
 // src/components/CategoryMenu.tsx
+import { useSEO } from '../hooks/useSEO';
 import React, { type ReactElement } from 'react';
 import { DisabilityCategory, Page } from '../types';
 
@@ -64,7 +65,33 @@ const ChoiceButton: React.FC<{
 
 export const CategoryMenu: React.FC<CategoryMenuProps> = ({ category, navigateTo, goBack }) => {
   const { title, icon } = categoryInfo[category];
+  // --- SEO dinámico por categoría ---
+  const origin =
+    typeof window !== 'undefined'
+      ? window.location.origin
+      : 'https://portal-tecnicfit-ia.vercel.app';
 
+  const pretty = {
+    visual:   { t: 'Discapacidad Visual',  d: 'Opciones y recursos para discapacidad visual.' },
+    auditiva: { t: 'Discapacidad Auditiva', d: 'Opciones y recursos para discapacidad auditiva.' },
+    habla:    { t: 'Discapacidad del Habla', d: 'Opciones y recursos para trastornos del habla.' },
+  }[category];
+
+  useSEO({
+    title: `Portal de Accesibilidad · ${pretty.t}`,
+    description: `Seleccione herramientas: catálogo de dispositivos y funcionalidades. ${pretty.d}`,
+    url: `${origin}/?category=${category}`,
+    jsonLd: {
+      '@context': 'https://schema.org',
+      '@type': 'CollectionPage',
+      name: `Portal de Accesibilidad · ${pretty.t}`,
+      url: `${origin}/?category=${category}`,
+      inLanguage: 'es',
+      about: pretty.d,
+      publisher: { '@type': 'Organization', name: 'TecnicFit IA' },
+    },
+  });
+  // --- fin SEO ---
   return (
     <section aria-labelledby="category-menu-title">
       <div className="relative mb-12 text-center">
