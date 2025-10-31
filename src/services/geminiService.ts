@@ -8,22 +8,19 @@ import type { DisabilityCategory, Device, Functionality } from '../types';
 
 type ApiOk<T> = T;
 
-async function callApi<T = any>(action: string, payload: any): Promise<ApiOk<T>> {
+async function callApi<T = any>(action: string, payload: any): Promise<T> {
   const res = await fetch('/api/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, payload }),
   });
 
-  if (!res.ok) {
-    let msg = res.statusText;
-    try {
-      const txt = await res.text();
-      msg = txt || res.statusText;
-    } catch {}
-    throw new Error(`API ${res.status}: ${msg}`);
-  }
+  const raw = await res.text();
+  if (!res.ok) throw new Error(`API ${res.status}: ${raw}`);
 
+  try { return JSON.parse(raw) as T; }
+  catch { return raw as unknown as T; }
+}
   return (await res.json()) as T;
 }
 
@@ -113,17 +110,40 @@ const functionalitiesSchemaWrapper = {
 export async function fetchAssistiveDevices(
   category: DisabilityCategory,
 ): Promise<Omit<Device, 'imageUrl'>[]> {
-  const prompt = buildDevicesPrompt(category);
+  const catMap: Record<DisabilityCategory, string> = {
+    visual: 'ceguera o discapacidad visual grave',
+    auditiva: 'sordera o discapacidad auditiva grave',
+    habla: 'mudez o discapacidad del habla grave',
+  };
 
-  // El backend devuelve { data: { dispositivos: [...] } }
-  const result = await callApi<{ data: { dispositivos: any[] } }>('generateStructured', {
-    prompt,
-    schema: devicesSchemaWrapper,
-  });
+  const prompt =
+    `Genera una lista de 5 dispositivos de asistencia modernos y populares ` +
+    `para personas con ${catMap[category]}. Para cada uno: nombre, descripción ` +
+    `y 3-5 características. Responde SOLO en JSON válido con la clave "dispositivos".`;
 
-  const dispositivos = Array.isArray(result?.data?.dispositivos)
-    ? result.data.dispositivos
-    : [];
+  const schema = {
+    type: 'object',
+    properties: {
+      dispositivos: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            nombre: { type: 'string' },
+            descripcion: { type: 'string' },
+            caracteristicas: { type: 'array', items: { type: 'string' } },
+          },
+          required: ['nombre', 'descripcion', 'caracteristicas'],
+        },
+      },
+    },
+    required: ['dispositivos'],
+  } as const;
+
+  const out = await callApi<any>('generateStructured', { prompt, schema });
+  const obj = typeof out === 'string' ? JSON.parse(out) : out;
+
+  const dispositivos = Array.isArray(obj?.dispositivos) ? obj.dispositivos : [];
 
   return dispositivos.map((d: any) => ({
     nombre: String(d?.nombre ?? ''),
@@ -133,7 +153,6 @@ export async function fetchAssistiveDevices(
       : [],
   }));
 }
-
 /** Funcionalidades de software/herramientas para una categoría */
 export async function fetchAssistiveFunctionalities(
   category: DisabilityCategory,
