@@ -1,10 +1,12 @@
 // src/services/geminiService.ts
-// Cliente FRONTEND para hablar con /api/generate (backend).
-// No usamos SDKs en el navegador: solo fetch al backend.
+// Cliente FRONTEND: habla con /api/generate (backend de Vercel).
+// No usa SDKs en el navegador; solo fetch al backend.
 
 import type { DisabilityCategory, Device, Functionality } from '../types';
 
-/* ---------------------------------- utils ---------------------------------- */
+/* -------------------------------------------------------------------------- */
+/* Utils                                                                      */
+/* -------------------------------------------------------------------------- */
 
 type ApiOk<T> = T;
 
@@ -16,15 +18,23 @@ async function callApi<T = any>(action: string, payload: any): Promise<T> {
   });
 
   const raw = await res.text();
-  if (!res.ok) throw new Error(`API ${res.status}: ${raw}`);
 
-  try { return JSON.parse(raw) as T; }
-  catch { return raw as unknown as T; }
-}
-  return (await res.json()) as T;
+  if (!res.ok) {
+    throw new Error(`API ${res.status}: ${raw}`);
+  }
+
+  // El backend puede devolver texto plano (JSON en string) o un objeto JSON.
+  // Aquí siempre intentamos parsear; si no es JSON, devolvemos el string tal cual.
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return raw as unknown as T;
+  }
 }
 
-/* ---------------------------- prompts y mapeos ----------------------------- */
+/* -------------------------------------------------------------------------- */
+/* Prompts                                                                    */
+/* -------------------------------------------------------------------------- */
 
 const categoryMap: Record<DisabilityCategory, string> = {
   visual: 'ceguera o discapacidad visual grave',
@@ -32,117 +42,81 @@ const categoryMap: Record<DisabilityCategory, string> = {
   habla: 'mudez o discapacidad del habla grave',
 };
 
-function buildDevicesPrompt(category: DisabilityCategory): string {
-  const cat = categoryMap[category];
+function devicesPrompt(category: DisabilityCategory): string {
   return (
     `Genera una lista de 5 dispositivos de asistencia modernos y populares ` +
-    `para personas con ${cat}. Para cada uno, devuelve: nombre, una descripción ` +
-    `clara y entre 3 y 5 características clave. Responde SOLO en JSON válido.`
+    `para personas con ${categoryMap[category]}. Para cada uno, devuelve: ` +
+    `nombre, descripción y 3-5 características. ` +
+    `Responde SOLO en JSON válido con la clave "dispositivos".`
   );
 }
 
-function buildFunctionalitiesPrompt(category: DisabilityCategory): string {
-  const cat = categoryMap[category];
+function functionalitiesPrompt(category: DisabilityCategory): string {
   return (
-    `Genera una lista de 4 funcionalidades de software o aplicaciones que ` +
-    `ayuden a personas con ${cat}. Para cada una, devuelve: nombre, descripción ` +
-    `y una lista de plataformas (iOS, Android, Windows, macOS, etc.). ` +
-    `Responde SOLO en JSON válido.`
+    `Genera 4 funcionalidades (software/apps) para personas con ${categoryMap[category]}. ` +
+    `Devuelve para cada una: nombre, descripción y plataformas (iOS, Android, Windows, macOS). ` +
+    `Responde SOLO en JSON válido con la clave "funcionalidades".`
   );
 }
 
-/* ------------------------------- Schemas ----------------------------------- */
-/* Objetos JSON Schema que enviamos al backend para forzar salida JSON.       */
+/* -------------------------------------------------------------------------- */
+/* Schemas (guías JSON que el backend envía al modelo)                        */
+/* -------------------------------------------------------------------------- */
 
-const deviceItemSchema = {
+const devicesSchema = {
   type: 'object',
   properties: {
-    nombre: { type: 'string', description: 'Nombre del dispositivo' },
-    descripcion: { type: 'string', description: 'Descripción breve' },
-    caracteristicas: {
+    dispositivos: {
       type: 'array',
-      items: { type: 'string' },
-      description: '3–5 características clave',
+      items: {
+        type: 'object',
+        properties: {
+          nombre: { type: 'string' },
+          descripcion: { type: 'string' },
+          caracteristicas: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['nombre', 'descripcion', 'caracteristicas'],
+      },
     },
-    // (opcional) por si el modelo lo incluye; no lo usamos en el tipo Device sin imageUrl
-    plataformas: {
-      type: 'array',
-      items: { type: 'string' },
-      description: 'Plataformas o entornos (iOS, Android, PC, etc.)',
-    },
-  },
-  required: ['nombre', 'descripcion', 'caracteristicas'],
-} as const;
-
-const devicesSchemaWrapper = {
-  type: 'object',
-  properties: {
-    dispositivos: { type: 'array', items: deviceItemSchema },
   },
   required: ['dispositivos'],
 } as const;
 
-const functionalityItemSchema = {
+const functionalitiesSchema = {
   type: 'object',
   properties: {
-    nombre: { type: 'string', description: 'Nombre de la funcionalidad' },
-    descripcion: { type: 'string', description: 'Descripción breve' },
-    plataformas: {
+    funcionalidades: {
       type: 'array',
-      items: { type: 'string' },
-      description: 'Plataformas (iOS, Android, Windows, macOS, etc.)',
+      items: {
+        type: 'object',
+        properties: {
+          nombre: { type: 'string' },
+          descripcion: { type: 'string' },
+          plataformas: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['nombre', 'descripcion', 'plataformas'],
+      },
     },
-  },
-  required: ['nombre', 'descripcion', 'plataformas'],
-} as const;
-
-const functionalitiesSchemaWrapper = {
-  type: 'object',
-  properties: {
-    funcionalidades: { type: 'array', items: functionalityItemSchema },
   },
   required: ['funcionalidades'],
 } as const;
 
-/* --------------------------- API de alto nivel ----------------------------- */
+/* -------------------------------------------------------------------------- */
+/* API de alto nivel                                                          */
+/* -------------------------------------------------------------------------- */
 
-/** Dispositivos de asistencia para una categoría */
 export async function fetchAssistiveDevices(
   category: DisabilityCategory,
 ): Promise<Omit<Device, 'imageUrl'>[]> {
-  const catMap: Record<DisabilityCategory, string> = {
-    visual: 'ceguera o discapacidad visual grave',
-    auditiva: 'sordera o discapacidad auditiva grave',
-    habla: 'mudez o discapacidad del habla grave',
-  };
+  const prompt = devicesPrompt(category);
 
-  const prompt =
-    `Genera una lista de 5 dispositivos de asistencia modernos y populares ` +
-    `para personas con ${catMap[category]}. Para cada uno: nombre, descripción ` +
-    `y 3-5 características. Responde SOLO en JSON válido con la clave "dispositivos".`;
+  // El backend devuelve un STRING JSON (texto plano) para generateStructured
+  const out = await callApi<any>('generateStructured', {
+    prompt,
+    schema: devicesSchema,
+  });
 
-  const schema = {
-    type: 'object',
-    properties: {
-      dispositivos: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            nombre: { type: 'string' },
-            descripcion: { type: 'string' },
-            caracteristicas: { type: 'array', items: { type: 'string' } },
-          },
-          required: ['nombre', 'descripcion', 'caracteristicas'],
-        },
-      },
-    },
-    required: ['dispositivos'],
-  } as const;
-
-  const out = await callApi<any>('generateStructured', { prompt, schema });
   const obj = typeof out === 'string' ? JSON.parse(out) : out;
-
   const dispositivos = Array.isArray(obj?.dispositivos) ? obj.dispositivos : [];
 
   return dispositivos.map((d: any) => ({
@@ -153,20 +127,20 @@ export async function fetchAssistiveDevices(
       : [],
   }));
 }
-/** Funcionalidades de software/herramientas para una categoría */
+
 export async function fetchAssistiveFunctionalities(
   category: DisabilityCategory,
 ): Promise<Omit<Functionality, 'imageUrl'>[]> {
-  const prompt = buildFunctionalitiesPrompt(category);
+  const prompt = functionalitiesPrompt(category);
 
-  // El backend devuelve { data: { funcionalidades: [...] } }
-  const result = await callApi<{ data: { funcionalidades: any[] } }>('generateStructured', {
+  const out = await callApi<any>('generateStructured', {
     prompt,
-    schema: functionalitiesSchemaWrapper,
+    schema: functionalitiesSchema,
   });
 
-  const funcionalidades = Array.isArray(result?.data?.funcionalidades)
-    ? result.data.funcionalidades
+  const obj = typeof out === 'string' ? JSON.parse(out) : out;
+  const funcionalidades = Array.isArray(obj?.funcionalidades)
+    ? obj.funcionalidades
     : [];
 
   return funcionalidades.map((f: any) => ({
@@ -178,18 +152,16 @@ export async function fetchAssistiveFunctionalities(
   }));
 }
 
-/* ----------------------------- (Opcional) Img ------------------------------ */
-/** Cuando tengas el endpoint real en backend, cambia este stub por la llamada. */
+/* -------------------------------------------------------------------------- */
+/* Imagen (stub temporal)                                                     */
+/* -------------------------------------------------------------------------- */
 
 const TRANSPARENT_PNG =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEklEQVR42mP8/5+hHgMDAwMjAAAmQwO1PqkW2QAAAABJRU5ErkJggg==';
 
 export async function generateImageForTerm(_term: string): Promise<string> {
-  // try {
-  //   const res = await callApi<{ imageUrl: string }>('generateImageForTerm', { term: _term });
-  //   return res?.imageUrl || TRANSPARENT_PNG;
-  // } catch {
-  //   return TRANSPARENT_PNG;
-  // }
+  // Si implementas el endpoint en el backend, llama aquí:
+  // const { imageUrl } = await callApi<{ imageUrl: string }>('generateImageForTerm', { term: _term });
+  // return imageUrl || TRANSPARENT_PNG;
   return TRANSPARENT_PNG;
 }
