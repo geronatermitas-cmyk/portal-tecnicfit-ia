@@ -1,99 +1,88 @@
-// api/generate.ts — compatible con CommonJS en Vercel
-// ❗️Sin imports ESM. Usamos require() y module.exports.
+// api/generate.ts  (Node/Edge en Vercel, ESM)
+// Asegúrate de tener "type": "module" en package.json
 
-type VercelRequest = any;
-type VercelResponse = any;
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
 
-// Carga del SDK en CommonJS
-// @ts-ignore
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-
-const API_KEY =
-  process.env.GOOGLE_API_KEY ||
-  process.env.API_KEY ||
-  '';
-
-/** Pequeña ayuda para devolver errores consistentes */
-function sendError(res: VercelResponse, status: number, msg: string, details?: any) {
-  return res.status(status).json({ error: msg, details });
+const API_KEY = process.env.GOOGLE_API_KEY;
+if (!API_KEY) {
+  throw new Error('Missing GOOGLE_API_KEY in environment variables');
 }
 
-module.exports = async function handler(req: VercelRequest, res: VercelResponse) {
-  // Solo POST
+// Usa un modelo DISPONIBLE para tu clave (según tu listado v1)
+const MODEL_TEXT = 'gemini-2.5-flash';
+
+const genAI = new GoogleGenerativeAI(API_KEY);
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  if (!API_KEY) {
-    return sendError(
-      res,
-      500,
-      'Missing API key',
-      'Define GOOGLE_API_KEY (o API_KEY) en Vercel → Project → Settings → Environment Variables y redeploy.'
-    );
-  }
-
-  // Instancia aquí (tras validar clave) para evitar crear el cliente si no hay KEY
-  const genAI = new GoogleGenerativeAI(API_KEY);
-
   try {
-    const body = req.body || {};
-    const action: string | undefined = body.action;
-    const payload: any = body.payload;
+    const { action, payload } = (req.body ?? {}) as {
+      action?: string;
+      payload?: any;
+    };
 
-    if (!action) return sendError(res, 400, 'Missing action');
+    if (!action) {
+      return res.status(400).json({ error: 'Missing action' });
+    }
 
     switch (action) {
-      /** Texto libre (si lo usas) */
       case 'generateText': {
         const prompt: string = payload?.prompt ?? '';
-        if (!prompt) return sendError(res, 400, 'Missing prompt');
-
-        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const model = genAI.getGenerativeModel({ model: MODEL_TEXT });
         const result = await model.generateContent(prompt);
-        return res.status(200).json({ text: result.response.text() });
+        const text = result.response?.text?.() ?? '';
+        return res.status(200).json({ text });
       }
 
-      /** Estructurado (lo que llaman tus pantallas de Catálogo/Funcionalidades) */
       case 'generateStructured': {
+        // Espera: { prompt: string, schema: object }
         const prompt: string = payload?.prompt ?? '';
-        const schema: any = payload?.schema;
-        if (!prompt) return sendError(res, 400, 'Missing prompt');
-        if (!schema) return sendError(res, 400, 'Missing schema');
+        const schemaObj: any = payload?.schema ?? null;
 
-        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        if (!prompt || !schemaObj) {
+          return res.status(400).json({ error: 'Missing prompt or schema' });
+        }
+
+        const model = genAI.getGenerativeModel({ model: MODEL_TEXT });
 
         const result = await model.generateContent({
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          // Forzamos JSON puro con schema v1 del SDK
           generationConfig: {
             responseMimeType: 'application/json',
-            responseSchema: schema,
-          } as any,
+            responseSchema: schemaObj as any, // { type: 'object', properties: { ... }, required: [...] }
+          },
         });
 
-        const text = result.response.text() || '';
+        const raw = result.response?.text?.() ?? '{}';
+        // El SDK devuelve el JSON como string; lo parseamos para darte un objeto
+        let data: unknown;
         try {
-          const data = JSON.parse(text);
-          return res.status(200).json({ data });
+          data = JSON.parse(raw);
         } catch {
-          // Si el modelo no respetó el JSON estricto, devolvemos 422 con el texto bruto
-          return res.status(422).json({
-            error: 'Structured JSON parse failed',
-            raw: text,
-          });
+          return res.status(422).json({ error: 'LLM returned non-JSON', raw });
         }
+        return res.status(200).json({ data });
       }
 
-      /** Aún no implementado (si decides añadir imágenes) */
       case 'generateImageForTerm': {
-        return res.status(501).json({ error: 'Image generation not implemented' });
+        // Aún no implementado (stub)
+        return res
+          .status(501)
+          .json({ error: 'Image generation not implemented in this endpoint' });
       }
 
       default:
-        return sendError(res, 400, `Unknown action: ${action}`);
+        return res.status(400).json({ error: `Unknown action: ${action}` });
     }
   } catch (e: any) {
-    console.error('API /api/generate error:', e?.message || e);
-    return sendError(res, 500, 'Server error', e?.message || String(e));
+    // Devuelve mensaje y detalles del SDK si están
+    const msg = e?.message ?? 'Server error';
+    const details = e?.toString?.() ?? String(e);
+    return res.status(500).json({ error: 'Server error', details: details || msg });
   }
-};
+}
