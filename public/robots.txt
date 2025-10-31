@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+
+# Evita indexar endpoints internos
+Disallow: /api/
+
+Sitemap: https://portal-tecnicfit-ia.vercel.app/sitemap.xml
