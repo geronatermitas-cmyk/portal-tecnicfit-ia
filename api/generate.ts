@@ -1,159 +1,102 @@
-// api/generate.ts  (Vercel Node Runtime)
-// Runtime: Node.js (no Edge). Asegúrate en Vercel: Project → Settings → Functions → Node.js 20.x
+// api/generate.ts
+// Runtime: Node.js 20 (no Edge).
+// Usa la variable de entorno GOOGLE_API_KEY definida en Vercel.
 
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-
-const API_KEY = process.env.GOOGLE_API_KEY;
-// Usa un modelo que tu cuenta LISTA realmente (según tu /v1/models):
-const MODEL = 'models/gemini-2.5-flash';
+const API_KEY = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+const MODEL = "models/gemini-2.5-flash"; // asegúrate de que exista en tu cuenta
 const API_URL = `https://generativelanguage.googleapis.com/v1/${MODEL}:generateContent`;
 
-function send(res: VercelResponse, status: number, body: unknown) {
-  res.status(status).setHeader('Content-Type', 'application/json').send(JSON.stringify(body));
+/** Envía respuesta JSON estándar */
+function send(res: any, status: number, body: unknown) {
+  res
+    .status(status)
+    .setHeader("Content-Type", "application/json")
+    .send(typeof body === "string" ? body : JSON.stringify(body));
 }
 
+/** Llama al endpoint Gemini con un body arbitrario */
 async function callGemini(body: unknown) {
   if (!API_KEY) {
-    return { ok: false as const, status: 500, body: { error: 'Missing GOOGLE_API_KEY' } };
+    return {
+      ok: false,
+      status: 500,
+      body: { error: "Missing GOOGLE_API_KEY" },
+    };
   }
+
   try {
     const resp = await fetch(`${API_URL}?key=${API_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+
     const text = await resp.text();
-    if (!resp.ok) {
-      return {
-        ok: false as const,
-        status: 502,
-        body: { error: 'Upstream error', status: resp.status, details: safeSlice(text, 4000) },
-      };
-    }
-    try {
-      return { ok: true as const, status: 200, body: JSON.parse(text) };
-    } catch {
-      // Gemini siempre responde JSON, pero por si acaso:
-      return { ok: true as const, status: 200, body: { raw: text } };
-    }
+    if (!resp.ok) return { ok: false, status: resp.status, body: text };
+    return { ok: true, status: 200, body: text };
   } catch (e: any) {
     return {
-      ok: false as const,
-      status: 502,
-      body: { error: 'Network error to Google', details: e?.message || String(e) },
+      ok: false,
+      status: 500,
+      body: { error: e?.message ?? "Server error" },
     };
   }
 }
 
-function partsToText(anyBody: any): string {
-  try {
-    const parts = anyBody?.candidates?.[0]?.content?.parts ?? [];
-    return parts.map((p: any) => p?.text || '').join('');
-  } catch {
-    return '';
+/** Controlador principal para la API */
+export default async function handler(req: any, res: any) {
+  if (req.method !== "POST") {
+    return send(res, 405, { error: "Method not allowed" });
   }
-}
 
-function extractJsonSmart(s: string): { ok: true; data: any } | { ok: false; raw: string } {
-  // Intenta parsear todo
   try {
-    return { ok: true, data: JSON.parse(s) };
-  } catch {}
-  // Intenta heurística: la 1ª llave/última llave
-  const start = s.indexOf('{');
-  const end = s.lastIndexOf('}');
-  if (start !== -1 && end !== -1 && end > start) {
-    const candidate = s.slice(start, end + 1);
-    try {
-      return { ok: true, data: JSON.parse(candidate) };
-    } catch {}
-  }
-  return { ok: false, raw: s };
-}
+    const { action, payload } = (req.body ?? {}) as {
+      action?: string;
+      payload?: any;
+    };
 
-function safeSlice(s: string, n: number) {
-  return (s || '').slice(0, n);
-}
+    if (!action) return send(res, 400, { error: "Missing action" });
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  try {
-    if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
-
-    const { action, payload } = (req.body ?? {}) as { action?: string; payload?: any };
-    if (!action) return send(res, 400, { error: 'Missing action' });
-
-    // 0) Ping para comprobar que la función responde
-    if (action === 'ping') {
-      return send(res, 200, { ok: true, runtime: 'node', model: MODEL, hasKey: Boolean(API_KEY) });
+    // Acción 1: generar texto libre
+    if (action === "generateText") {
+      const prompt = payload?.prompt ?? "";
+      const out = await callGemini({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+      });
+      return send(res, out.status, out.body);
     }
 
-    // 1) Texto libre
-    if (action === 'generateText') {
-      const prompt: string = payload?.prompt ?? '';
-      if (!prompt) return send(res, 400, { error: 'Missing prompt' });
-      const up = await callGemini({ contents: [{ role: 'user', parts: [{ text: prompt }] }] });
-      if (!up.ok) return send(res, up.status, up.body);
-      const text = partsToText(up.body);
-      return send(res, 200, { text });
-    }
+    // Acción 2: generar respuesta estructurada (JSON)
+    if (action === "generateStructured") {
+      const prompt = payload?.prompt ?? "";
+      const schema = payload?.schema ?? {};
 
-    // 2) Estructurado (con fallback)
-    if (action === 'generateStructured') {
-      const prompt = payload?.prompt;
-      const schema = payload?.schema;
-      if (!prompt || !schema) return send(res, 400, { error: 'Missing prompt or schema' });
-
-      // 2.a) Intento con responseSchema (modo “fino”)
-      const upA = await callGemini({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      const out = await callGemini({
+        systemInstruction: {
+          parts: [
+            {
+              text:
+                "Responde SOLO en JSON válido con este esquema aproximado:\n" +
+                JSON.stringify(schema),
+            },
+          ],
+        },
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
-          // En REST v1 es camelCase:
-          responseMimeType: 'application/json',
-          responseSchema: schema,
+          responseMimeType: "application/json",
         },
       });
 
-      if (upA.ok) {
-        const asText = partsToText(upA.body);
-        const parsed = extractJsonSmart(asText);
-        if (parsed.ok) return send(res, 200, { data: parsed.data });
-        // Si el modelo no respetó el JSON (raro), reporta 422 con raw
-        return send(res, 422, { error: 'LLM returned non-JSON', raw: safeSlice(asText, 8000) });
-      }
-
-      // 2.b) Fallback: pedir JSON por prompt (sin responseSchema)
-      const upB = await callGemini({
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                text:
-                  `${prompt}\n\n` +
-                  `Responde exclusivamente en JSON válido y nada más. ` +
-                  `No incluyas explicación ni marcadores de código.`,
-              },
-            ],
-          },
-        ],
-      });
-
-      if (!upB.ok) return send(res, upB.status, upB.body);
-
-      const asTextB = partsToText(upB.body);
-      const parsedB = extractJsonSmart(asTextB);
-      if (parsedB.ok) return send(res, 200, { data: parsedB.data });
-      return send(res, 422, { error: 'LLM returned non-JSON (fallback)', raw: safeSlice(asTextB, 8000) });
+      return send(res, out.status, out.body);
     }
 
-    // 3) Placeholder imágenes
-    if (action === 'generateImageForTerm') {
-      return send(res, 501, { error: 'Image generation not implemented' });
+    // Acción 3: simple ping para probar conexión
+    if (action === "ping") {
+      return send(res, 200, { ok: true, message: "Pong!" });
     }
 
     return send(res, 400, { error: `Unknown action: ${action}` });
   } catch (e: any) {
-    // Pase lo que pase, **no** tiramos la función
-    return send(res, 500, { error: 'Server error', details: e?.message || String(e) });
+    return send(res, 500, { error: e?.message ?? "Server error" });
   }
 }
