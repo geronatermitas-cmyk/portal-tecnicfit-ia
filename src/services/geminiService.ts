@@ -1,68 +1,59 @@
 // src/services/geminiService.ts
-// Cliente FRONTEND: habla con /api/generate (backend de Vercel).
-// No usa SDKs en el navegador; solo fetch al backend.
-
+// Cliente FRONTEND: solo hace fetch a /api/generate (backend en Vercel).
 import type { DisabilityCategory, Device, Functionality } from '../types';
 
-/* -------------------------------------------------------------------------- */
-/* Utils                                                                      */
-/* -------------------------------------------------------------------------- */
-
+/* ------------------------------- utils ---------------------------------- */
 type ApiOk<T> = T;
 
-async function callApi<T = any>(action: string, payload: any): Promise<T> {
+async function callApi<T = any>(action: string, payload: any): Promise<ApiOk<T>> {
   const res = await fetch('/api/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, payload }),
   });
 
+  // intentamos texto primero para mostrar errores legibles del backend
   const raw = await res.text();
-
   if (!res.ok) {
-    throw new Error(`API ${res.status}: ${raw}`);
+    throw new Error(`API ${res.status}: ${raw || res.statusText}`);
   }
 
-  // El backend puede devolver texto plano (JSON en string) o un objeto JSON.
-  // Aquí siempre intentamos parsear; si no es JSON, devolvemos el string tal cual.
   try {
     return JSON.parse(raw) as T;
   } catch {
-    return raw as unknown as T;
+    // en 422 el backend puede devolver { raw: "...texto no JSON..." }
+    return { raw } as unknown as T;
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/* Prompts                                                                    */
-/* -------------------------------------------------------------------------- */
-
+/* -------------------------- prompts y mapeos ---------------------------- */
 const categoryMap: Record<DisabilityCategory, string> = {
   visual: 'ceguera o discapacidad visual grave',
   auditiva: 'sordera o discapacidad auditiva grave',
   habla: 'mudez o discapacidad del habla grave',
 };
 
-function devicesPrompt(category: DisabilityCategory): string {
+function buildDevicesPrompt(category: DisabilityCategory): string {
+  const cat = categoryMap[category];
   return (
-    `Genera una lista de 5 dispositivos de asistencia modernos y populares ` +
-    `para personas con ${categoryMap[category]}. Para cada uno, devuelve: ` +
-    `nombre, descripción y 3-5 características. ` +
-    `Responde SOLO en JSON válido con la clave "dispositivos".`
+    `Devuelve un JSON con la forma:\n` +
+    `{"dispositivos":[{"nombre":"","descripcion":"","caracteristicas":["","",""]}]}\n\n` +
+    `Instrucción: Lista 5 dispositivos de asistencia modernos para personas con ${cat}. ` +
+    `Usa descripciones claras y 3–5 características por ítem. Sin texto fuera del JSON.`
   );
 }
 
-function functionalitiesPrompt(category: DisabilityCategory): string {
+function buildFunctionalitiesPrompt(category: DisabilityCategory): string {
+  const cat = categoryMap[category];
   return (
-    `Genera 4 funcionalidades (software/apps) para personas con ${categoryMap[category]}. ` +
-    `Devuelve para cada una: nombre, descripción y plataformas (iOS, Android, Windows, macOS). ` +
-    `Responde SOLO en JSON válido con la clave "funcionalidades".`
+    `Devuelve un JSON con la forma:\n` +
+    `{"funcionalidades":[{"nombre":"","descripcion":"","plataformas":["iOS","Android"]}]}\n\n` +
+    `Instrucción: Lista 4 funcionalidades de software útiles para personas con ${cat}. ` +
+    `Incluye plataformas. Sin texto fuera del JSON.`
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/* Schemas (guías JSON que el backend envía al modelo)                        */
-/* -------------------------------------------------------------------------- */
-
+/* ------------------------------- schemas -------------------------------- */
 const devicesSchema = {
   type: 'object',
   properties: {
@@ -101,23 +92,26 @@ const functionalitiesSchema = {
   required: ['funcionalidades'],
 } as const;
 
-/* -------------------------------------------------------------------------- */
-/* API de alto nivel                                                          */
-/* -------------------------------------------------------------------------- */
+/* --------------------------- API de alto nivel -------------------------- */
+export async function generateFromGemini(prompt: string): Promise<string> {
+  const r = await callApi<{ text?: string }>('generateText', { prompt });
+  return r?.text ?? '';
+}
 
 export async function fetchAssistiveDevices(
   category: DisabilityCategory,
 ): Promise<Omit<Device, 'imageUrl'>[]> {
-  const prompt = devicesPrompt(category);
+  const prompt = buildDevicesPrompt(category);
 
-  // El backend devuelve un STRING JSON (texto plano) para generateStructured
-  const out = await callApi<any>('generateStructured', {
+  // El backend guía al modelo y luego intenta parsear JSON; si no puede, responde 422 con {raw}
+  const r = await callApi<{ data?: any; raw?: string }>('generateStructured', {
     prompt,
     schema: devicesSchema,
   });
 
-  const obj = typeof out === 'string' ? JSON.parse(out) : out;
-  const dispositivos = Array.isArray(obj?.dispositivos) ? obj.dispositivos : [];
+  const dispositivos = Array.isArray(r?.data?.dispositivos)
+    ? r.data.dispositivos
+    : [];
 
   return dispositivos.map((d: any) => ({
     nombre: String(d?.nombre ?? ''),
@@ -131,16 +125,15 @@ export async function fetchAssistiveDevices(
 export async function fetchAssistiveFunctionalities(
   category: DisabilityCategory,
 ): Promise<Omit<Functionality, 'imageUrl'>[]> {
-  const prompt = functionalitiesPrompt(category);
+  const prompt = buildFunctionalitiesPrompt(category);
 
-  const out = await callApi<any>('generateStructured', {
+  const r = await callApi<{ data?: any; raw?: string }>('generateStructured', {
     prompt,
     schema: functionalitiesSchema,
   });
 
-  const obj = typeof out === 'string' ? JSON.parse(out) : out;
-  const funcionalidades = Array.isArray(obj?.funcionalidades)
-    ? obj.funcionalidades
+  const funcionalidades = Array.isArray(r?.data?.funcionalidades)
+    ? r.data.funcionalidades
     : [];
 
   return funcionalidades.map((f: any) => ({
@@ -152,16 +145,10 @@ export async function fetchAssistiveFunctionalities(
   }));
 }
 
-/* -------------------------------------------------------------------------- */
-/* Imagen (stub temporal)                                                     */
-/* -------------------------------------------------------------------------- */
-
+/* ----------------------------- stub imágenes ---------------------------- */
 const TRANSPARENT_PNG =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEklEQVR42mP8/5+hHgMDAwMjAAAmQwO1PqkW2QAAAABJRU5ErkJggg==';
 
 export async function generateImageForTerm(_term: string): Promise<string> {
-  // Si implementas el endpoint en el backend, llama aquí:
-  // const { imageUrl } = await callApi<{ imageUrl: string }>('generateImageForTerm', { term: _term });
-  // return imageUrl || TRANSPARENT_PNG;
   return TRANSPARENT_PNG;
 }
